@@ -233,8 +233,8 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertIn('id="theme-toggle"', header_utilities)
         self.assertIn('id="shutdown-application"', header_utilities)
         self.assertLess(
-            header_utilities.index('id="shutdown-application"'),
             header_utilities.index('id="theme-toggle"'),
+            header_utilities.index('id="shutdown-application"'),
         )
 
     def test_frontend_prioritizes_primary_actions_and_accessible_feedback(

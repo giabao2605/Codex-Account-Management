@@ -223,7 +223,19 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertIn('--surface: #f1f4f8;', styles)
         self.assertIn('--panel-background: rgba(242, 245, 249, 0.94);', styles)
         self.assertIn('.theme-toggle {', styles)
-        self.assertIn('position: fixed', styles)
+        self.assertIn('class="header-utilities"', page)
+        self.assertIn('.header-utilities {', styles)
+
+        header_utilities = page[
+            page.index('<div class="header-utilities"') :
+            page.index('</div>', page.index('<div class="header-utilities"'))
+        ]
+        self.assertIn('id="theme-toggle"', header_utilities)
+        self.assertIn('id="shutdown-application"', header_utilities)
+        self.assertLess(
+            header_utilities.index('id="shutdown-application"'),
+            header_utilities.index('id="theme-toggle"'),
+        )
 
     def test_frontend_prioritizes_primary_actions_and_accessible_feedback(
         self,
@@ -311,7 +323,7 @@ class LocalWebApiTests(unittest.TestCase):
             render_state.index("restoreCardInteraction(cardInteraction);"),
         )
 
-    def test_frontend_exposes_preview_profile_recommendation_and_shutdown_actions(
+    def test_frontend_exposes_preview_profile_and_shutdown_without_overview_cards(
         self,
     ) -> None:
         page = self.client.get("/").text
@@ -319,9 +331,11 @@ class LocalWebApiTests(unittest.TestCase):
 
         self.assertIn('id="preview-import"', page)
         self.assertIn('id="reject-on-errors"', page)
-        self.assertIn('id="recommended-account"', page)
-        self.assertIn('id="orphan-profile-count"', page)
-        self.assertIn('id="archive-orphan-profiles"', page)
+        self.assertNotIn('id="recommended-account"', page)
+        self.assertNotIn('id="orphan-profile-count"', page)
+        self.assertNotIn('id="archive-orphan-profiles"', page)
+        self.assertNotIn("Tài khoản đề xuất", page)
+        self.assertNotIn("Profile không còn dùng", page)
         self.assertIn('id="shutdown-application"', page)
         self.assertIn('"unlink"', script)
         self.assertIn('"reset-profile"', script)
@@ -330,7 +344,7 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertIn("reject_on_errors", script)
         self.assertIn("/unlink", script)
         self.assertIn("/reset-profile", script)
-        self.assertIn("/api/profiles/orphans/archive", script)
+        self.assertNotIn("/api/profiles/orphans/archive", script)
         self.assertIn("/api/application/shutdown", script)
         self.assertIn("previewRequestId", script)
         self.assertIn("requestedLines", script)
@@ -374,15 +388,15 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertIn(".workspace-tabs", styles)
         self.assertIn(".usage-table", styles)
 
-    def test_frontend_explains_recommendation_and_profile_actions(
+    def test_frontend_keeps_profile_actions_without_overview_cards(
         self,
     ) -> None:
         page = self.client.get("/").text
         script = self.client.get("/assets/app.js").text
 
-        self.assertIn("Tài khoản khỏe, còn quota cao nhất", page)
-        self.assertIn("Profile không còn dùng", page)
-        self.assertIn("Thư mục đăng nhập cũ", page)
+        self.assertNotIn("Tài khoản khỏe, còn quota cao nhất", page)
+        self.assertNotIn("Profile không còn dùng", page)
+        self.assertNotIn("Thư mục đăng nhập cũ", page)
         self.assertIn("Giữ tài khoản trong danh sách", script)
         self.assertIn("tạo profile trống", script)
 

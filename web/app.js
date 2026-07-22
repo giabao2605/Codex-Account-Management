@@ -17,9 +17,6 @@ const ui = {
   refreshInterval: document.querySelector("#refresh-interval"),
   lastUpdated: document.querySelector("#last-updated"),
   accountFilter: document.querySelector("#account-filter"),
-  recommendedAccount: document.querySelector("#recommended-account"),
-  orphanProfileCount: document.querySelector("#orphan-profile-count"),
-  archiveOrphanProfiles: document.querySelector("#archive-orphan-profiles"),
   shutdownApplication: document.querySelector("#shutdown-application"),
   accountDialog: document.querySelector("#account-dialog"),
   openImport: document.querySelector("#open-import"),
@@ -581,10 +578,6 @@ function renderState(state) {
   ui.refreshInterval.textContent = formatRefreshInterval(
     state.refresh_interval_seconds,
   );
-  ui.recommendedAccount.textContent = state.recommendation?.email || "Chưa có đề xuất";
-  const orphanCount = Number(state.orphan_profile_count || 0);
-  ui.orphanProfileCount.textContent = String(orphanCount);
-  ui.archiveOrphanProfiles.disabled = orphanCount === 0;
   renderUsageStatistics(state.usage_statistics);
 
   const { usage_statistics: _usageStatistics, ...stableState } = state;
@@ -935,23 +928,6 @@ async function importAccounts() {
   }
 }
 
-async function archiveOrphanProfiles() {
-  const count = Number(ui.orphanProfileCount.textContent || 0);
-  const confirmed = window.confirm(
-    `Lưu trữ ${count} profile mồ côi? Các profile sẽ không còn xuất hiện trong danh sách đang dùng.`,
-  );
-  if (!confirmed) return;
-  ui.archiveOrphanProfiles.disabled = true;
-  try {
-    await api("/api/profiles/orphans/archive", { method: "POST" });
-    showToast("Đã lưu trữ các profile mồ côi.");
-    await pollState();
-  } catch (error) {
-    showToast(error.message, true);
-    ui.archiveOrphanProfiles.disabled = false;
-  }
-}
-
 async function shutdownApplication() {
   const confirmed = window.confirm(
     "Thoát ứng dụng OTP Codex? Trang này sẽ ngừng cập nhật sau khi ứng dụng tắt.",
@@ -1009,7 +985,6 @@ ui.accountLines.addEventListener("input", invalidateImportPreview);
 ui.previewImport.addEventListener("click", previewImport);
 ui.importAccounts.addEventListener("click", importAccounts);
 ui.refreshAll.addEventListener("click", refreshAllAccounts);
-ui.archiveOrphanProfiles.addEventListener("click", archiveOrphanProfiles);
 ui.shutdownApplication.addEventListener("click", shutdownApplication);
 ui.accountGrid.addEventListener("click", handleCardAction);
 ui.accountFilter.addEventListener("change", applyAccountFilters);

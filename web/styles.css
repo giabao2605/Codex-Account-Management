@@ -176,10 +176,6 @@ h3 {
 }
 
 .theme-toggle {
-  position: fixed;
-  top: 18px;
-  right: 22px;
-  z-index: 20;
   display: grid;
   width: 46px;
   height: 46px;
@@ -245,11 +241,24 @@ h3 {
 }
 
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-end;
-  justify-content: space-between;
-  gap: 32px;
+  column-gap: 32px;
+  row-gap: 12px;
   margin-bottom: 22px;
+}
+
+.header-utilities {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.header-utilities .button {
+  min-height: 46px;
 }
 
 .brand-block,
@@ -360,7 +369,7 @@ h3 {
 
 .summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }
@@ -536,19 +545,6 @@ h3 {
   padding: 48px 20px;
   color: var(--muted);
   text-align: center;
-}
-
-.summary-card-action {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.summary-card-action .button {
-  min-height: 36px;
-  padding: 7px 11px;
-  font-size: 0.78rem;
 }
 
 .summary-card,
@@ -1224,8 +1220,12 @@ textarea,
 
 @media (max-width: 900px) {
   .topbar {
+    grid-template-columns: minmax(0, 1fr);
     align-items: flex-start;
-    flex-direction: column;
+  }
+
+  .header-utilities {
+    justify-self: end;
   }
 
   .topbar-actions {
@@ -1273,7 +1273,7 @@ textarea,
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .connection {

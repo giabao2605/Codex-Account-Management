@@ -15,6 +15,7 @@ const ui = {
   syncUnlinkedCount: document.querySelector("#sync-unlinked-count"),
   syncErrorCount: document.querySelector("#sync-error-count"),
   refreshInterval: document.querySelector("#refresh-interval"),
+  timeSyncStatus: document.querySelector("#time-sync-status"),
   lastUpdated: document.querySelector("#last-updated"),
   accountFilter: document.querySelector("#account-filter"),
   shutdownApplication: document.querySelector("#shutdown-application"),
@@ -56,7 +57,7 @@ const ui = {
 
 const themeStorageKey = "otp-codex-theme";
 const tokenStorageKey = "otp-codex-access-token";
-const expectedApiSchemaVersion = 2;
+const expectedApiSchemaVersion = 3;
 const fragmentToken = window.location.hash.slice(1);
 if (fragmentToken) {
   window.sessionStorage.setItem(tokenStorageKey, fragmentToken);
@@ -208,6 +209,24 @@ function formatRefreshInterval(seconds) {
   return `${seconds} giây`;
 }
 
+function renderTimeSyncStatus(timeSync) {
+  const status = timeSync || {};
+  const offset = Number(status.offset_seconds);
+  if (status.status === "synced" && Number.isFinite(offset)) {
+    const roundedOffset = Math.round(offset);
+    const sign = roundedOffset > 0 ? "+" : "";
+    ui.timeSyncStatus.textContent = `Giờ OTP đã chuẩn · bù ${sign}${roundedOffset} giây`;
+    return;
+  }
+  if (status.status === "degraded") {
+    ui.timeSyncStatus.textContent = status.last_synced_at
+      ? "Đang dùng mốc giờ chuẩn gần nhất"
+      : "Chưa lấy được giờ chuẩn · OTP có thể lệch";
+    return;
+  }
+  ui.timeSyncStatus.textContent = "Đang lấy giờ chuẩn cho OTP";
+}
+
 function metadataRow(label, value) {
   const row = element("div", "meta-row");
   row.append(element("dt", "", label), element("dd", "", value || "—"));
@@ -237,24 +256,42 @@ function createAccountCard(account) {
 
   const otpBlock = element("section", "otp-block");
   const otpHeading = element("div", "otp-heading");
+  const otpAvailable = Boolean(account.otp);
+  const otpRemaining = otpAvailable ? account.otp_remaining_seconds : 0;
   otpHeading.append(
     element("span", "data-label", "Mã OTP"),
-    element("span", "otp-timer", `Còn ${account.otp_remaining_seconds} giây`),
+    element(
+      "span",
+      "otp-timer",
+      otpAvailable ? `Còn ${otpRemaining} giây` : "Chờ đồng bộ giờ chuẩn",
+    ),
   );
-  const otpCode = actionButton(account.otp, "copy-otp", account.id, {
-    className: "otp-code",
-    field: "display",
-    ariaLabel: `Sao chép mã OTP ${account.otp} của ${account.email}`,
-  });
-  otpCode.title = "Bấm để sao chép OTP";
+  const otpCode = actionButton(
+    account.otp || "OTP chưa sẵn sàng",
+    "copy-otp",
+    account.id,
+    {
+      className: "otp-code",
+      field: "display",
+      ariaLabel: otpAvailable
+        ? `Sao chép mã OTP ${account.otp} của ${account.email}`
+        : `OTP của ${account.email} chưa sẵn sàng`,
+    },
+  );
+  otpCode.disabled = !otpAvailable;
+  otpCode.title = otpAvailable
+    ? "Bấm để sao chép OTP"
+    : "Chưa lấy được giờ chuẩn nên OTP tạm khóa";
   otpBlock.append(
     otpHeading,
     otpCode,
     createProgress(
       "otp-progress",
-      account.otp_remaining_seconds,
+      otpRemaining,
       30,
-      `OTP còn hiệu lực ${account.otp_remaining_seconds} giây`,
+      otpAvailable
+        ? `OTP còn hiệu lực ${otpRemaining} giây`
+        : "OTP đang chờ đồng bộ giờ chuẩn",
     ),
   );
 
@@ -306,10 +343,12 @@ function createAccountCard(account) {
   const optionActions = element("div", "option-actions");
   optionActions.id = optionsId;
   optionActions.hidden = true;
+  const copyOtpOption = actionButton("Sao chép OTP", "copy-otp", account.id, {
+    ariaLabel: `Sao chép OTP của ${account.email}`,
+  });
+  copyOtpOption.disabled = !otpAvailable;
   optionActions.append(
-    actionButton("Sao chép OTP", "copy-otp", account.id, {
-      ariaLabel: `Sao chép OTP của ${account.email}`,
-    }),
+    copyOtpOption,
     actionButton("Đồng bộ", "refresh", account.id, {
       ariaLabel: `Đồng bộ ${account.email}`,
     }),
@@ -338,7 +377,7 @@ function createAccountCard(account) {
 
   card.dataset.accountId = account.id;
   card.dataset.email = account.email;
-  card.dataset.otp = account.otp;
+  card.dataset.otp = account.otp || "";
   card.dataset.needsAttention = String(needsAttention(account));
   const accountQuotaPercent = parsedQuotaPercent(account.quota_remaining);
   card.dataset.quotaKnown = String(accountQuotaPercent !== null);
@@ -578,6 +617,7 @@ function renderState(state) {
   ui.refreshInterval.textContent = formatRefreshInterval(
     state.refresh_interval_seconds,
   );
+  renderTimeSyncStatus(state.time_sync);
   renderUsageStatistics(state.usage_statistics);
 
   const { usage_statistics: _usageStatistics, ...stableState } = state;
@@ -592,21 +632,30 @@ function renderState(state) {
     state.accounts.forEach((account) => {
       const card = ui.accountGrid.querySelector(`[data-account-id="${account.id}"]`);
       if (!card) return;
-      card.dataset.otp = account.otp;
+      const otpAvailable = Boolean(account.otp);
+      const otpRemaining = otpAvailable ? account.otp_remaining_seconds : 0;
+      card.dataset.otp = account.otp || "";
       const otpCode = card.querySelector(".otp-code");
-      otpCode.textContent = account.otp;
+      otpCode.textContent = account.otp || "OTP chưa sẵn sàng";
+      otpCode.disabled = !otpAvailable;
       otpCode.setAttribute(
         "aria-label",
-        `Sao chép mã OTP ${account.otp} của ${account.email}`,
+        otpAvailable
+          ? `Sao chép mã OTP ${account.otp} của ${account.email}`
+          : `OTP của ${account.email} chưa sẵn sàng`,
       );
       card.querySelector(".otp-timer").textContent =
-        `Còn ${account.otp_remaining_seconds} giây`;
+        otpAvailable ? `Còn ${otpRemaining} giây` : "Chờ đồng bộ giờ chuẩn";
       const otpProgress = card.querySelector(".otp-progress");
-      otpProgress.value = account.otp_remaining_seconds;
+      otpProgress.value = otpRemaining;
       otpProgress.setAttribute(
         "aria-label",
-        `OTP còn hiệu lực ${account.otp_remaining_seconds} giây`,
+        otpAvailable
+          ? `OTP còn hiệu lực ${otpRemaining} giây`
+          : "OTP đang chờ đồng bộ giờ chuẩn",
       );
+      card.querySelector('.option-actions [data-action="copy-otp"]').disabled =
+        !otpAvailable;
     });
   } else {
     cardInteraction = replaceAccountCards(state.accounts);

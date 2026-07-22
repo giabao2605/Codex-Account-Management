@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 
-API_SCHEMA_VERSION = 2
+API_SCHEMA_VERSION = 3
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUILD_INPUTS = (
     "run_local_web.py",
@@ -15,6 +15,7 @@ BUILD_INPUTS = (
     "app/local_web_profiles.py",
     "app/local_web_service.py",
     "app/otp_codex_manager_with_account_status.py",
+    "app/trusted_clock.py",
     "web/app.js",
     "web/index.html",
     "web/styles.css",

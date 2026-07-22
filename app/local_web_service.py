@@ -26,7 +26,6 @@ from .otp_codex_manager_with_account_status import (
     CodexInfo,
     build_codex_command,
     build_codex_environment,
-    corrected_time,
     create_totp,
     decrypt_text,
     detect_banned_account,
@@ -39,6 +38,7 @@ from .otp_codex_manager_with_account_status import (
     protect_sensitive_tree,
     requires_codex_relogin,
 )
+from .trusted_clock import TrustedClock, get_default_trusted_clock
 
 
 class AccountNotFoundError(LookupError):
@@ -107,11 +107,14 @@ class LocalWebService:
         profiles_dir: Path,
         enable_codex: bool = True,
         refresh_interval_seconds: int = 60,
+        trusted_clock: TrustedClock | None = None,
     ) -> None:
         self.data_file = Path(data_file)
         self.profiles_dir = Path(profiles_dir)
         self.enable_codex = enable_codex
         self.refresh_interval_seconds = refresh_interval_seconds
+        self._trusted_clock = trusted_clock or get_default_trusted_clock()
+        self._owns_trusted_clock = trusted_clock is not None
         self.csrf_token = secrets.token_urlsafe(32)
         self.access_token = secrets.token_urlsafe(48)
         self._lock = threading.RLock()
@@ -152,6 +155,8 @@ class LocalWebService:
             self._sync_codex_info_locked()
             self._started = True
 
+        self._trusted_clock.start()
+
         if self.enable_codex:
             scheduler_thread = threading.Thread(
                 target=self._scheduler,
@@ -182,9 +187,13 @@ class LocalWebService:
             session.close()
         for process in login_processes:
             self._terminate_login_process(process)
+        if self._owns_trusted_clock:
+            self._trusted_clock.close()
 
     def state(self) -> dict:
-        now = corrected_time()
+        time_sync = self._trusted_clock.status()
+        has_trusted_time = time_sync["last_synced_at"] is not None
+        now = int(self._trusted_clock.now()) if has_trusted_time else None
         with self._lock:
             accounts = tuple(self._accounts)
             info_by_key = dict(self._codex_info)
@@ -196,15 +205,14 @@ class LocalWebService:
                 key,
                 CodexInfo(stored_email=account.email),
             )
-            remaining_seconds = (
-                account.totp.interval
-                - now % account.totp.interval
+            remaining_seconds = None if now is None else (
+                account.totp.interval - now % account.totp.interval
             )
             rows.append(
                 {
                     "id": self.account_id(account.email),
                     "email": account.email,
-                    "otp": account.totp.at(now),
+                    "otp": None if now is None else account.totp.at(now),
                     "otp_remaining_seconds": remaining_seconds,
                     "quota_remaining": info.remaining_percent,
                     "quota_cycle": info.cycle,
@@ -222,6 +230,7 @@ class LocalWebService:
             "orphan_profile_count": self.orphan_profile_count(),
             "recommendation": self._recommend_account(rows),
             "usage_statistics": self._usage_statistics(rows),
+            "time_sync": time_sync,
         }
 
     def preview_import(self, raw_text: str) -> dict:

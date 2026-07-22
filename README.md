@@ -67,6 +67,12 @@ Các thao tác ngắt liên kết và tạo lại hồ sơ đều yêu cầu xá
 - `Ngắt liên kết` lưu trữ profile đăng nhập hiện tại nhưng giữ tài khoản trong danh sách. Lần sau cần liên kết Codex lại.
 - `Đặt lại profile` lưu trữ toàn bộ profile hiện tại rồi tạo một profile trống, dùng khi profile bị lỗi hoặc cần đăng nhập lại từ đầu.
 
+## Đồng bộ giờ OTP
+
+Ứng dụng không phụ thuộc vào giờ Windows để sinh OTP. Khi khởi động và định kỳ mỗi 5 phút, backend đọc giờ từ ba nguồn HTTPS, loại mẫu chậm hoặc bất thường, lấy trung vị rồi neo kết quả vào đồng hồ monotonic. Mã OTP và bộ đếm 30 giây luôn dùng cùng mốc này, nên việc máy công ty chỉnh giờ nhanh hoặc chậm không làm mã bị lệch.
+
+Nếu mạng tạm thời lỗi, ứng dụng tiếp tục dùng mốc chuẩn gần nhất và hiển thị trạng thái suy giảm. Nếu chưa từng lấy được giờ chuẩn kể từ lúc mở ứng dụng, mã OTP sẽ tạm khóa thay vì dùng giờ Windows có thể sai. Có thể thay danh sách nguồn bằng biến môi trường `OTP_TIME_SOURCES`, gồm các URL HTTPS phân tách bằng dấu phẩy.
+
 ## Thống kê sử dụng
 
 Tab `Thống kê sử dụng` hiển thị snapshot quota mới nhất theo từng tài khoản: phần trăm đã dùng và còn lại, gói, chu kỳ, thời điểm reset, trạng thái và lần đồng bộ gần nhất.

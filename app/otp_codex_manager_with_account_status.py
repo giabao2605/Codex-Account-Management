@@ -23,11 +23,10 @@ import win32crypt
 import win32security
 
 from .codex_sync import CodexProfileSession, CodexReloginRequired
+from .trusted_clock import TrustedClock, get_default_trusted_clock
 
 
 APP_VERSION = "account-status-v3-persistent-sync"
-# Máy công ty đang nhanh hơn giờ chuẩn 139 giây.
-TIME_OFFSET_SECONDS = -139
 
 OTP_REFRESH_INTERVAL_MS = 200
 CODEX_REFRESH_INTERVAL_SECONDS = 60
@@ -143,8 +142,10 @@ class CodexInfo:
     last_sync: str = "—"
 
 
-def corrected_time() -> int:
-    return int(time.time() + TIME_OFFSET_SECONDS)
+def corrected_time(clock: TrustedClock | None = None) -> int:
+    active_clock = clock or get_default_trusted_clock()
+    active_clock.start()
+    return int(active_clock.now())
 
 
 def looks_like_base32_secret(value: str) -> bool:
@@ -185,7 +186,8 @@ def create_totp(secret: str) -> pyotp.TOTP:
     )
 
     # Kiểm tra secret có thể tạo mã.
-    totp.at(corrected_time())
+    # Validation must remain deterministic and must not start network time sync.
+    totp.at(0)
     return totp
 
 
@@ -1020,7 +1022,7 @@ class OTPManagerApp:
             self.account_tab,
             text=(
                 f"Dữ liệu OTP: {DATA_FILE} | "
-                f"Offset: {TIME_OFFSET_SECONDS} giây"
+                "Thời gian OTP: tự đồng bộ HTTPS"
             ),
         ).pack(
             anchor="w",

@@ -113,12 +113,14 @@ class LocalWebApiTests(unittest.TestCase):
             API_SCHEMA_VERSION,
         )
         self.assertEqual(bootstrap["build_id"], APP_BUILD_ID)
-        self.assertEqual(
-            self.client.get("/api/state").json()[
-                "refresh_interval_seconds"
-            ],
-            60,
-        )
+        state = self.client.get("/api/state").json()
+        self.assertEqual(state["refresh_interval_seconds"], 60)
+        self.assertIn(state["time_sync"]["status"], {
+            "synced",
+            "syncing",
+            "degraded",
+        })
+        self.assertIn("offset_seconds", state["time_sync"])
 
     def test_account_display_order_prioritizes_attention_then_quota(
         self,
@@ -245,6 +247,7 @@ class LocalWebApiTests(unittest.TestCase):
         styles = self.client.get("/assets/styles.css").text
 
         self.assertIn('id="refresh-interval">—', page)
+        self.assertIn('id="time-sync-status"', page)
         self.assertNotIn("TRÌNH QUẢN LÝ CỤC BỘ", page)
         self.assertIn('id="last-updated"', page)
         self.assertNotIn('id="last-updated" aria-live="polite"', page)
@@ -258,8 +261,9 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertNotIn('class="sync-banner"', page)
         self.assertIn('id="visible-account-count"', page)
         self.assertIn("option-toggle", script)
-        self.assertIn('actionButton(account.otp, "copy-otp"', script)
-        self.assertIn('title = "Bấm để sao chép OTP"', script)
+        self.assertIn('account.otp || "OTP chưa sẵn sàng"', script)
+        self.assertIn('? "Bấm để sao chép OTP"', script)
+        self.assertIn('OTP tạm khóa', script)
         self.assertIn('setAttribute("aria-expanded"', script)
         self.assertNotIn('"account-more"', script)
         self.assertIn(".option-actions[hidden]", styles)
@@ -287,6 +291,9 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertIn('filter === "quota-unknown"', script)
         self.assertIn("function syncMetrics", script)
         self.assertIn("function formatRefreshInterval", script)
+        self.assertIn("function renderTimeSyncStatus", script)
+        self.assertIn("Chưa lấy được giờ chuẩn · OTP có thể lệch", script)
+        self.assertIn("OTP chưa sẵn sàng", script)
         self.assertIn("summaryTotal === state.accounts.length", script)
         self.assertIn('classList.toggle("is-active"', script)
         self.assertIn("grid-template-columns: repeat(4", styles)

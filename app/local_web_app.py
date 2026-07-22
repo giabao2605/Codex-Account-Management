@@ -37,8 +37,8 @@ LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
 class AccountState(BaseModel):
     id: str
     email: str
-    otp: str
-    otp_remaining_seconds: int
+    otp: str | None
+    otp_remaining_seconds: int | None
     quota_remaining: str
     quota_cycle: str
     quota_reset_at: str
@@ -99,6 +99,13 @@ class UsageStatistics(BaseModel):
     accounts: list[AccountUsageStatistics]
 
 
+class TimeSyncState(BaseModel):
+    status: Literal["synced", "syncing", "degraded"]
+    offset_seconds: float | None
+    last_synced_at: str | None
+    source_count: int
+
+
 class StateResponse(BaseModel):
     accounts: list[AccountState]
     sync_status: str
@@ -106,6 +113,7 @@ class StateResponse(BaseModel):
     orphan_profile_count: int
     recommendation: AccountRecommendation | None
     usage_statistics: UsageStatistics
+    time_sync: TimeSyncState
 
 
 class BootstrapResponse(BaseModel):

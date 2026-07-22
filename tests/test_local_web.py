@@ -151,6 +151,28 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(script.status_code, 200)
         self.assertIn("window.sessionStorage", script.text)
 
+    def test_frontend_supports_persistent_light_and_dark_themes(self) -> None:
+        page = self.client.get("/").text
+        init_script = self.client.get("/assets/theme-init.js")
+        app_script = self.client.get("/assets/app.js").text
+        styles = self.client.get("/assets/styles.css").text
+
+        self.assertEqual(init_script.status_code, 200)
+        self.assertIn('content="light dark"', page)
+        self.assertIn('src="/assets/theme-init.js"', page)
+        self.assertIn('id="theme-toggle"', page)
+        self.assertIn('aria-pressed="true"', page)
+        self.assertIn('id="theme-color"', page)
+        self.assertIn('otp-codex-theme', init_script.text)
+        self.assertIn('window.localStorage', init_script.text)
+        self.assertIn('prefers-color-scheme: light', init_script.text)
+        self.assertIn('themeToggle: document.querySelector("#theme-toggle")', app_script)
+        self.assertIn('ui.themeToggle.addEventListener("click"', app_script)
+        self.assertIn('window.localStorage.setItem(themeStorageKey', app_script)
+        self.assertIn(':root[data-theme="light"]', styles)
+        self.assertIn('.theme-toggle {', styles)
+        self.assertIn('position: fixed', styles)
+
     def test_frontend_prioritizes_primary_actions_and_accessible_feedback(
         self,
     ) -> None:

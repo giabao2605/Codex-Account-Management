@@ -3,13 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0b1020">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" id="theme-color" content="#0b1020">
   <title>OTP Codex Local</title>
+  <script src="/assets/theme-init.js"></script>
   <link rel="stylesheet" href="/assets/styles.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
+  <button class="theme-toggle" id="theme-toggle" type="button"
+          aria-label="Chuyển sang giao diện sáng" aria-pressed="true"
+          title="Chuyển sang giao diện sáng">
+    <span class="theme-toggle-icon" aria-hidden="true"></span>
+    <span class="visually-hidden" id="theme-toggle-text">Giao diện tối</span>
+  </button>
+
   <main class="shell">
     <header class="topbar">
       <div class="brand-block">

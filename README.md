@@ -13,6 +13,7 @@
 - Lọc tài khoản theo trạng thái và quota.
 - Sao chép email, mật khẩu hoặc secret theo thao tác chủ động.
 - Liên kết lại tài khoản Codex khi phiên đăng nhập hết hiệu lực.
+- Chuyển đổi giữa giao diện sáng và tối, tự ghi nhớ lựa chọn trên trình duyệt.
 
 ## Cấu trúc thư mục
 
@@ -43,6 +44,10 @@ python run_local_web.py
 ```
 
 Ứng dụng sẽ mở trình duyệt tại `http://127.0.0.1:8765` sau khi dịch vụ sẵn sàng. Nếu ứng dụng đã chạy, launcher sẽ mở lại trang đang hoạt động thay vì tạo thêm dịch vụ trên cùng cổng.
+
+## Chuyển giao diện
+
+Sử dụng nút ở góc trên bên phải trang để chuyển giữa giao diện sáng và tối. Ứng dụng ghi nhớ lựa chọn cho những lần mở sau; nếu chưa từng chọn, giao diện sẽ sử dụng thiết lập sáng hoặc tối của hệ điều hành.
 
 ## Tạo shortcut
 

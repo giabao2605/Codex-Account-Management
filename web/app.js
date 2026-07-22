@@ -1,6 +1,9 @@
 "use strict";
 
 const ui = {
+  themeToggle: document.querySelector("#theme-toggle"),
+  themeToggleText: document.querySelector("#theme-toggle-text"),
+  themeColor: document.querySelector("#theme-color"),
   connection: document.querySelector("#connection-status"),
   refreshAll: document.querySelector("#refresh-all"),
   accountCount: document.querySelector("#account-count"),
@@ -26,6 +29,7 @@ const ui = {
   toast: document.querySelector("#toast"),
 };
 
+const themeStorageKey = "otp-codex-theme";
 const tokenStorageKey = "otp-codex-access-token";
 const fragmentToken = window.location.hash.slice(1);
 if (fragmentToken) {
@@ -38,6 +42,34 @@ let pollInProgress = false;
 let toastTimer = 0;
 let renderSignature = "";
 let currentState = { accounts: [] };
+
+function applyTheme(theme, options = {}) {
+  const normalizedTheme = theme === "light" ? "light" : "dark";
+  const isDark = normalizedTheme === "dark";
+  const nextThemeLabel = isDark
+    ? "Chuyển sang giao diện sáng"
+    : "Chuyển sang giao diện tối";
+
+  document.documentElement.dataset.theme = normalizedTheme;
+  document.documentElement.style.colorScheme = normalizedTheme;
+  ui.themeToggle.setAttribute("aria-pressed", String(isDark));
+  ui.themeToggle.setAttribute("aria-label", nextThemeLabel);
+  ui.themeToggle.title = nextThemeLabel;
+  ui.themeToggleText.textContent = isDark ? "Giao diện tối" : "Giao diện sáng";
+  ui.themeColor.content = isDark ? "#0b1020" : "#f3f6fc";
+
+  if (options.persist === false) return;
+  try {
+    window.localStorage.setItem(themeStorageKey, normalizedTheme);
+  } catch (_error) {
+    // Theme vẫn được áp dụng trong phiên hiện tại nếu trình duyệt chặn lưu trữ.
+  }
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.dataset.theme;
+  applyTheme(currentTheme === "dark" ? "light" : "dark");
+}
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -630,6 +662,8 @@ async function refreshAllAccounts() {
   }
 }
 
+applyTheme(document.documentElement.dataset.theme, { persist: false });
+ui.themeToggle.addEventListener("click", toggleTheme);
 ui.openImport.addEventListener("click", openImportDialog);
 document.querySelectorAll("[data-open-import]").forEach((node) => {
   node.addEventListener("click", openImportDialog);

@@ -17,15 +17,43 @@ const ui = {
   refreshInterval: document.querySelector("#refresh-interval"),
   lastUpdated: document.querySelector("#last-updated"),
   accountFilter: document.querySelector("#account-filter"),
+  recommendedAccount: document.querySelector("#recommended-account"),
+  orphanProfileCount: document.querySelector("#orphan-profile-count"),
+  archiveOrphanProfiles: document.querySelector("#archive-orphan-profiles"),
+  shutdownApplication: document.querySelector("#shutdown-application"),
   accountDialog: document.querySelector("#account-dialog"),
   openImport: document.querySelector("#open-import"),
   closeImport: document.querySelector("#close-import"),
   cancelImport: document.querySelector("#cancel-import"),
   accountLines: document.querySelector("#account-lines"),
+  previewImport: document.querySelector("#preview-import"),
+  rejectOnErrors: document.querySelector("#reject-on-errors"),
   importAccounts: document.querySelector("#import-accounts"),
   importResult: document.querySelector("#import-result"),
+  importPreview: document.querySelector("#import-preview"),
+  previewCounts: document.querySelector("#preview-counts"),
+  previewChanges: document.querySelector("#preview-changes"),
   accountGrid: document.querySelector("#account-grid"),
   emptyState: document.querySelector("#empty-state"),
+  tabs: Array.from(document.querySelectorAll('[role="tab"]')),
+  accountPanel: document.querySelector("#accounts-panel"),
+  usagePanel: document.querySelector("#usage-panel"),
+  usageAverageUsed: document.querySelector("#usage-average-used"),
+  usageAverageRemaining: document.querySelector("#usage-average-remaining"),
+  usageKnownCount: document.querySelector("#usage-known-count"),
+  usageUnknownCount: document.querySelector("#usage-unknown-count"),
+  usageStaleCount: document.querySelector("#usage-stale-count"),
+  usageAttentionCount: document.querySelector("#usage-attention-count"),
+  usageUsableCount: document.querySelector("#usage-usable-count"),
+  usageLowCount: document.querySelector("#usage-low-count"),
+  usageRange: document.querySelector("#usage-range"),
+  usageMedian: document.querySelector("#usage-median"),
+  usageNextReset: document.querySelector("#usage-next-reset"),
+  usagePlanDistribution: document.querySelector("#usage-plan-distribution"),
+  usageSnapshotTime: document.querySelector("#usage-snapshot-time"),
+  usageDisclaimer: document.querySelector("#usage-disclaimer"),
+  usageAccountRows: document.querySelector("#usage-account-rows"),
+  usageEmpty: document.querySelector("#usage-empty"),
   toast: document.querySelector("#toast"),
 };
 
@@ -42,6 +70,10 @@ let pollInProgress = false;
 let toastTimer = 0;
 let renderSignature = "";
 let currentState = { accounts: [] };
+let importPreviewToken = "";
+let previewRequestId = 0;
+let pollTimer = 0;
+let applicationStopping = false;
 
 function applyTheme(theme, options = {}) {
   const normalizedTheme = theme === "light" ? "light" : "dark";
@@ -56,7 +88,7 @@ function applyTheme(theme, options = {}) {
   ui.themeToggle.setAttribute("aria-label", nextThemeLabel);
   ui.themeToggle.title = nextThemeLabel;
   ui.themeToggleText.textContent = isDark ? "Giao diện tối" : "Giao diện sáng";
-  ui.themeColor.content = isDark ? "#0b1020" : "#f3f6fc";
+  ui.themeColor.content = isDark ? "#0b1020" : "#e8edf5";
 
   if (options.persist === false) return;
   try {
@@ -183,11 +215,15 @@ function metadataRow(label, value) {
 }
 
 function createAccountCard(account) {
-  const card = element("article", "account-card");
+  const recommended = account.id === currentState.recommendation?.account_id;
+  const card = element("article", `account-card${recommended ? " is-recommended" : ""}`);
   const header = element("div", "card-header");
   const identity = element("div", "identity");
   identity.append(element("h3", "email", account.email));
   identity.append(element("p", "plan", account.plan_type || "Chưa xác định gói"));
+  if (recommended) {
+    identity.append(element("span", "recommendation-badge", "Đề xuất sử dụng"));
+  }
 
   const pill = element(
     "span",
@@ -283,6 +319,12 @@ function createAccountCard(account) {
     }),
     actionButton("Liên kết Codex", "login", account.id, {
       ariaLabel: `Liên kết Codex cho ${account.email}`,
+    }),
+    actionButton("Ngắt liên kết", "unlink", account.id, {
+      ariaLabel: `Ngắt liên kết Codex của ${account.email}`,
+    }),
+    actionButton("Đặt lại profile", "reset-profile", account.id, {
+      ariaLabel: `Đặt lại profile Codex của ${account.email}`,
     }),
   );
   const deleteButton = actionButton("Xóa tài khoản", "delete", account.id, {
@@ -411,6 +453,115 @@ function replaceAccountCards(accounts) {
   return interaction;
 }
 
+function formatUsagePercent(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toLocaleString("vi-VN")}%` : "—";
+}
+
+function formatGeneratedTime(value) {
+  if (!value) return "Đang tổng hợp dữ liệu";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `Tổng hợp lúc ${value}`;
+  return `Tổng hợp lúc ${date.toLocaleString("vi-VN")}`;
+}
+
+function usageCell(value, className = "") {
+  return element("td", className, value === null || value === undefined ? "—" : String(value));
+}
+
+function renderUsageStatistics(usageStatistics) {
+  const statistics = usageStatistics || {};
+  const total = Number(statistics.total_accounts || 0);
+  const known = Number(statistics.quota_known_accounts || 0);
+  const low = Number(statistics.low_quota_accounts || 0);
+  const exhausted = Number(statistics.exhausted_accounts || 0);
+  const rows = Array.isArray(statistics.accounts) ? statistics.accounts : [];
+
+  ui.usageAverageUsed.textContent = known > 0
+    ? formatUsagePercent(statistics.average_used_percent)
+    : "—";
+  ui.usageAverageRemaining.textContent = known > 0
+    ? formatUsagePercent(statistics.average_remaining_percent)
+    : "—";
+  ui.usageKnownCount.textContent = `${known} / ${total}`;
+  ui.usageUnknownCount.textContent =
+    `${Number(statistics.quota_unknown_accounts || 0)} chưa có dữ liệu`;
+  ui.usageStaleCount.textContent =
+    `${Number(statistics.stale_quota_accounts || 0)} cần đồng bộ lại`;
+  ui.usageAttentionCount.textContent = String(statistics.attention_accounts || 0);
+  ui.usageUsableCount.textContent = String(statistics.usable_accounts || 0);
+  ui.usageLowCount.textContent = `${low} / ${exhausted}`;
+  const minimum = formatUsagePercent(statistics.minimum_remaining_percent);
+  const maximum = formatUsagePercent(statistics.maximum_remaining_percent);
+  ui.usageRange.textContent = known > 0 ? `${minimum} – ${maximum}` : "—";
+  ui.usageMedian.textContent = formatUsagePercent(statistics.median_remaining_percent);
+  ui.usageNextReset.textContent = statistics.next_reset_at || "—";
+  const plans = Array.isArray(statistics.plan_distribution)
+    ? statistics.plan_distribution
+    : [];
+  ui.usagePlanDistribution.textContent = plans.length > 0
+    ? plans.map((plan) => `${plan.plan_type}: ${plan.count}`).join(" · ")
+    : "—";
+
+  ui.usageSnapshotTime.textContent = formatGeneratedTime(
+    statistics.generated_at,
+  );
+  if (statistics.history_available === false) {
+    ui.usageDisclaimer.textContent =
+      "Đây là snapshot hiện tại. Quota cũ của tài khoản cần xử lý không được tính vào tổng hợp. Chưa có lịch sử, số token hoặc số request.";
+  }
+
+  const tableRows = rows.map((account) => {
+    const row = element("tr");
+    const identity = usageCell(account.email, "usage-account-email");
+    const status = account.quota_is_stale ? "Cần đồng bộ lại" : (
+      account.needs_attention ? "Cần xử lý" : (
+        account.is_usable ? "Dùng được" : "Chưa sẵn sàng"
+      )
+    );
+    const statusCell = usageCell(status, account.needs_attention
+      ? "usage-status is-attention"
+      : "usage-status");
+    row.append(
+      identity,
+      usageCell(account.plan_type),
+      usageCell(formatUsagePercent(account.quota_used_percent), "usage-number"),
+      usageCell(formatUsagePercent(account.quota_remaining_percent), "usage-number"),
+      statusCell,
+      usageCell(account.quota_reset_at),
+      usageCell(account.last_sync),
+    );
+    return row;
+  });
+  ui.usageAccountRows.replaceChildren(...tableRows);
+  ui.usageEmpty.hidden = rows.length > 0;
+  ui.usageAccountRows.closest("table").hidden = rows.length === 0;
+}
+
+function activateTab(tab) {
+  ui.tabs.forEach((candidate) => {
+    const selected = candidate === tab;
+    candidate.setAttribute("aria-selected", String(selected));
+    candidate.tabIndex = selected ? 0 : -1;
+    candidate.classList.toggle("is-active", selected);
+    const panel = document.querySelector(`#${candidate.getAttribute("aria-controls")}`);
+    panel.hidden = !selected;
+  });
+}
+
+function handleTabKeydown(event) {
+  let direction = 0;
+  if (event.key === "ArrowRight") direction = 1;
+  if (event.key === "ArrowLeft") direction = -1;
+  if (direction === 0) return;
+  event.preventDefault();
+  const currentIndex = ui.tabs.indexOf(event.currentTarget);
+  const nextIndex = (currentIndex + direction + ui.tabs.length) % ui.tabs.length;
+  activateTab(ui.tabs[nextIndex]);
+  ui.tabs[nextIndex].focus();
+}
+
 function renderState(state) {
   currentState = state;
   let cardInteraction = null;
@@ -425,9 +576,15 @@ function renderState(state) {
   ui.refreshInterval.textContent = formatRefreshInterval(
     state.refresh_interval_seconds,
   );
+  ui.recommendedAccount.textContent = state.recommendation?.email || "Chưa có đề xuất";
+  const orphanCount = Number(state.orphan_profile_count || 0);
+  ui.orphanProfileCount.textContent = String(orphanCount);
+  ui.archiveOrphanProfiles.disabled = orphanCount === 0;
+  renderUsageStatistics(state.usage_statistics);
 
+  const { usage_statistics: _usageStatistics, ...stableState } = state;
   const nextSignature = JSON.stringify({
-    ...state,
+    ...stableState,
     accounts: state.accounts.map(
       ({ otp: _otp, otp_remaining_seconds: _remaining, ...account }) => account,
     ),
@@ -497,7 +654,11 @@ async function api(path, options = {}) {
   const response = await fetch(path, { ...options, method, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail || `Yêu cầu thất bại (${response.status})`);
+    const error = new Error(
+      payload.detail || `Yêu cầu thất bại (${response.status})`,
+    );
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -513,7 +674,7 @@ async function bootstrap() {
 }
 
 async function pollState() {
-  if (pollInProgress) return;
+  if (applicationStopping || pollInProgress) return;
   pollInProgress = true;
   try {
     renderState(await api("/api/state"));
@@ -578,6 +739,22 @@ async function handleCardAction(event) {
       await api(`/api/codex/${accountId}/login`, { method: "POST" });
       showToast("Đã mở cửa sổ đăng nhập Codex.");
       await pollState();
+    } else if (action === "unlink") {
+      const confirmed = window.confirm(
+        `Ngắt liên kết Codex của ${card.dataset.email}? Profile hiện tại sẽ được chuyển vào vùng lưu trữ.`,
+      );
+      if (!confirmed) return;
+      await api(`/api/codex/${accountId}/unlink`, { method: "POST" });
+      showToast("Đã ngắt liên kết Codex.");
+      await pollState();
+    } else if (action === "reset-profile") {
+      const confirmed = window.confirm(
+        `Đặt lại profile Codex của ${card.dataset.email}? Bạn sẽ cần liên kết lại tài khoản.`,
+      );
+      if (!confirmed) return;
+      await api(`/api/codex/${accountId}/reset-profile`, { method: "POST" });
+      showToast("Đã đặt lại profile Codex.");
+      await pollState();
     } else if (action === "delete") {
       const confirmed = window.confirm(
         `Xóa ${card.querySelector(".email").textContent} khỏi danh sách? Hồ sơ Codex vẫn được giữ lại.`,
@@ -595,21 +772,108 @@ async function handleCardAction(event) {
 }
 
 function openImportDialog() {
-  ui.importResult.textContent = "";
-  ui.importResult.className = "import-result";
+  invalidateImportPreview();
   ui.accountDialog.showModal();
   ui.accountLines.focus();
 }
 
+function invalidateImportPreview() {
+  previewRequestId += 1;
+  importPreviewToken = "";
+  ui.importResult.textContent = "";
+  ui.importResult.className = "import-result";
+  ui.importPreview.hidden = true;
+  ui.previewCounts.replaceChildren();
+  ui.previewChanges.replaceChildren();
+  ui.importAccounts.disabled = true;
+}
+
+function consumeImportPreview() {
+  importPreviewToken = "";
+  ui.importPreview.hidden = true;
+  ui.previewCounts.replaceChildren();
+  ui.previewChanges.replaceChildren();
+  ui.importAccounts.disabled = true;
+}
+
+function previewCount(label, value) {
+  const item = element("div", "preview-count");
+  item.append(element("dt", "", label), element("dd", "", String(value || 0)));
+  return item;
+}
+
+function renderImportPreview(result) {
+  const counts = result.counts || {};
+  ui.previewCounts.replaceChildren(
+    previewCount("Thêm mới", counts.added),
+    previewCount("Cập nhật", counts.updated),
+    previewCount("Trùng", counts.duplicates),
+    previewCount("Lỗi", counts.errors),
+  );
+  const actionLabels = { add: "Thêm mới", update: "Cập nhật", duplicate: "Trùng" };
+  const changes = Array.isArray(result.changes) ? result.changes : [];
+  ui.previewChanges.replaceChildren(...changes.map((change) => {
+    const item = element("li", "preview-change");
+    item.append(
+      element("span", "preview-email", String(change.email || "Tài khoản")),
+      element("span", "preview-action", actionLabels[change.action] || "Không đổi"),
+    );
+    return item;
+  }));
+  if (!changes.length) {
+    ui.previewChanges.append(element("li", "preview-empty", "Không có thay đổi hợp lệ."));
+  }
+  ui.importPreview.hidden = false;
+  ui.importResult.textContent = counts.errors
+    ? `Có ${counts.errors} dòng lỗi. Kiểm tra lựa chọn trước khi xác nhận.`
+    : "Bản xem trước đã sẵn sàng. Chưa có dữ liệu nào được lưu.";
+  ui.importResult.className = counts.errors ? "import-result is-error" : "import-result";
+}
+
+async function previewImport() {
+  const requestedLines = ui.accountLines.value.trim();
+  if (!requestedLines) {
+    ui.importResult.textContent = "Hãy nhập ít nhất một tài khoản.";
+    ui.importResult.className = "import-result is-error";
+    return;
+  }
+  invalidateImportPreview();
+  const requestId = previewRequestId;
+  ui.previewImport.disabled = true;
+  ui.previewImport.textContent = "Đang kiểm tra...";
+  try {
+    const result = await api("/api/accounts/import/preview", {
+      method: "POST",
+      body: JSON.stringify({ lines: requestedLines }),
+    });
+    if (
+      requestId !== previewRequestId
+      || ui.accountLines.value.trim() !== requestedLines
+    ) {
+      return;
+    }
+    importPreviewToken = result.preview_token;
+    renderImportPreview(result);
+    ui.importAccounts.disabled = !importPreviewToken;
+  } catch (error) {
+    if (requestId !== previewRequestId) return;
+    ui.importResult.textContent = error.message;
+    ui.importResult.className = "import-result is-error";
+  } finally {
+    ui.previewImport.disabled = false;
+    ui.previewImport.textContent = "Xem trước";
+  }
+}
+
 function closeImportDialog() {
+  invalidateImportPreview();
   ui.accountDialog.close();
   ui.openImport.focus();
 }
 
 async function importAccounts() {
-  const lines = ui.accountLines.value.trim();
-  if (!lines) {
-    ui.importResult.textContent = "Hãy nhập ít nhất một tài khoản.";
+  if (!importPreviewToken) {
+    ui.importResult.textContent = "Hãy tạo lại bản xem trước trước khi lưu.";
     ui.importResult.className = "import-result is-error";
     return;
   }
@@ -619,17 +883,21 @@ async function importAccounts() {
   try {
     const result = await api("/api/accounts/import", {
       method: "POST",
-      body: JSON.stringify({ lines }),
+      body: JSON.stringify({
+        preview_token: importPreviewToken,
+        reject_on_errors: ui.rejectOnErrors.checked,
+      }),
     });
     const summary = `Tổng ${result.total}; thêm ${result.added}; cập nhật ${result.updated}; trùng ${result.duplicates}.`;
     ui.importResult.textContent = result.errors.length
-      ? `${summary} Lỗi: ${result.errors.join(" ")}`
+      ? `${summary} Có ${result.errors.length} dòng lỗi; nội dung nhạy cảm không được hiển thị.`
       : summary;
     ui.importResult.className = result.errors.length
       ? "import-result is-error"
       : "import-result";
 
     await pollState();
+    consumeImportPreview();
     if (!result.errors.length) {
       ui.accountLines.value = "";
       ui.accountDialog.close();
@@ -640,7 +908,52 @@ async function importAccounts() {
     ui.importResult.className = "import-result is-error";
   } finally {
     ui.importAccounts.disabled = false;
-    ui.importAccounts.textContent = "Lưu tài khoản";
+    ui.importAccounts.textContent = "Xác nhận lưu";
+    ui.importAccounts.disabled = !importPreviewToken;
+  }
+}
+
+async function archiveOrphanProfiles() {
+  const count = Number(ui.orphanProfileCount.textContent || 0);
+  const confirmed = window.confirm(
+    `Lưu trữ ${count} profile mồ côi? Các profile sẽ không còn xuất hiện trong danh sách đang dùng.`,
+  );
+  if (!confirmed) return;
+  ui.archiveOrphanProfiles.disabled = true;
+  try {
+    await api("/api/profiles/orphans/archive", { method: "POST" });
+    showToast("Đã lưu trữ các profile mồ côi.");
+    await pollState();
+  } catch (error) {
+    showToast(error.message, true);
+    ui.archiveOrphanProfiles.disabled = false;
+  }
+}
+
+async function shutdownApplication() {
+  const confirmed = window.confirm(
+    "Thoát ứng dụng OTP Codex? Trang này sẽ ngừng cập nhật sau khi ứng dụng tắt.",
+  );
+  if (!confirmed) return;
+  ui.shutdownApplication.disabled = true;
+  applicationStopping = true;
+  window.clearInterval(pollTimer);
+  ui.connection.textContent = "Ứng dụng đang tắt";
+  ui.connection.className = "connection";
+  try {
+    await api("/api/application/shutdown", { method: "POST" });
+    showToast("Ứng dụng đang tắt. Bạn có thể đóng trang này.");
+  } catch (error) {
+    if (!error.status) {
+      showToast("Kết nối đã đóng sau khi gửi yêu cầu thoát.");
+      return;
+    }
+    applicationStopping = false;
+    pollTimer = window.setInterval(pollState, 1000);
+    ui.connection.textContent = "Đang hoạt động";
+    ui.connection.className = "connection is-online";
+    ui.shutdownApplication.disabled = false;
+    showToast(error.message, true);
   }
 }
 
@@ -670,14 +983,22 @@ document.querySelectorAll("[data-open-import]").forEach((node) => {
 });
 ui.closeImport.addEventListener("click", closeImportDialog);
 ui.cancelImport.addEventListener("click", closeImportDialog);
+ui.accountLines.addEventListener("input", invalidateImportPreview);
+ui.previewImport.addEventListener("click", previewImport);
 ui.importAccounts.addEventListener("click", importAccounts);
 ui.refreshAll.addEventListener("click", refreshAllAccounts);
+ui.archiveOrphanProfiles.addEventListener("click", archiveOrphanProfiles);
+ui.shutdownApplication.addEventListener("click", shutdownApplication);
 ui.accountGrid.addEventListener("click", handleCardAction);
 ui.accountFilter.addEventListener("change", applyAccountFilters);
+ui.tabs.forEach((tab) => {
+  tab.addEventListener("click", () => activateTab(tab));
+  tab.addEventListener("keydown", handleTabKeydown);
+});
 
 if (accessToken) {
   window.history.replaceState(null, "", window.location.pathname + window.location.search);
 }
 
 bootstrap();
-window.setInterval(pollState, 1000);
+pollTimer = window.setInterval(pollState, 1000);

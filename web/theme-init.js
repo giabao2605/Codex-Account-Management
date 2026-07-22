@@ -18,6 +18,6 @@
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   document.querySelector("#theme-color").content = theme === "light"
-    ? "#f3f6fc"
+    ? "#e8edf5"
     : "#0b1020";
 })();

@@ -16,6 +16,8 @@ env/
 
 # Runtime data and sensitive local state
 accounts.json
+accounts.tmp
+.accounts.json.*.tmp
 codex_profiles/
 .web_session.json
 ..web_session.json.tmp

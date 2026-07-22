@@ -11,6 +11,17 @@ def merge_accounts(
     current_accounts: tuple[Account, ...],
     raw_text: str,
 ) -> tuple[tuple[Account, ...], dict]:
+    merged_accounts, result, _ = plan_account_merge(
+        current_accounts,
+        raw_text,
+    )
+    return merged_accounts, result
+
+
+def plan_account_merge(
+    current_accounts: tuple[Account, ...],
+    raw_text: str,
+) -> tuple[tuple[Account, ...], dict, tuple[dict[str, str], ...]]:
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
 
     if not lines:
@@ -23,6 +34,7 @@ def merge_accounts(
     updated = 0
     duplicates = 0
     errors: list[str] = []
+    changes: list[dict[str, str]] = []
 
     for line_number, line in enumerate(lines, start=1):
         try:
@@ -61,6 +73,7 @@ def merge_accounts(
             if email_index is None:
                 working_accounts = [*working_accounts, replacement]
                 added += 1
+                changes.append({"email": email, "action": "add"})
                 continue
 
             existing = working_accounts[email_index]
@@ -73,14 +86,17 @@ def merge_accounts(
                 for index, account in enumerate(working_accounts)
             ]
             updated += 1
+            changes.append({"email": email, "action": "update"})
         except Exception as error:
             errors.append(f"Dòng {line_number}: {error}")
 
     merged_accounts = tuple(working_accounts)
-    return merged_accounts, {
+    result = {
         "total": len(merged_accounts),
         "added": added,
         "updated": updated,
         "duplicates": duplicates,
+        "error_count": len(errors),
         "errors": errors[:20],
     }
+    return merged_accounts, result, tuple(changes)

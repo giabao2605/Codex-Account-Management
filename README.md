@@ -8,11 +8,16 @@
 
 - Hiển thị và sao chép OTP theo thời gian thực.
 - Theo dõi quota, chu kỳ và thời điểm reset.
+- Tab thống kê quota hiện tại theo từng tài khoản và tổng hợp toàn hệ thống.
 - Đồng bộ trạng thái tài khoản Codex mỗi 1 phút.
 - Cô lập mỗi tài khoản trong một `CODEX_HOME` riêng.
 - Lọc tài khoản theo trạng thái và quota.
+- Đề xuất tài khoản phù hợp nhất dựa trên trạng thái, quota và thời điểm reset; ứng dụng không tự chuyển tài khoản.
 - Sao chép email, mật khẩu hoặc secret theo thao tác chủ động.
+- Xem trước kết quả import, chọn lưu toàn bộ hoặc chỉ các dòng hợp lệ.
 - Liên kết lại tài khoản Codex khi phiên đăng nhập hết hiệu lực.
+- Ngắt liên kết, tạo lại hồ sơ sạch và lưu trữ hồ sơ không còn gắn với tài khoản.
+- Thoát ứng dụng an toàn ngay trên giao diện.
 - Chuyển đổi giữa giao diện sáng và tối, tự ghi nhớ lựa chọn trên trình duyệt.
 
 ## Cấu trúc thư mục
@@ -49,6 +54,24 @@ python run_local_web.py
 
 Sử dụng nút ở góc trên bên phải trang để chuyển giữa giao diện sáng và tối. Ứng dụng ghi nhớ lựa chọn cho những lần mở sau; nếu chưa từng chọn, giao diện sẽ sử dụng thiết lập sáng hoặc tối của hệ điều hành.
 
+## Import tài khoản
+
+Dán danh sách tài khoản rồi chọn xem trước. Ứng dụng chỉ hiển thị email, hành động dự kiến và lỗi; mật khẩu và secret không xuất hiện trong kết quả xem trước.
+
+Mặc định, nếu có bất kỳ dòng lỗi nào thì ứng dụng không lưu dữ liệu. Bạn có thể bỏ lựa chọn này để chỉ lưu các dòng hợp lệ. Kết quả xem trước chỉ dùng được một lần và sẽ bị từ chối nếu dữ liệu tài khoản đã thay đổi trước khi áp dụng.
+
+## Quản lý hồ sơ Codex
+
+Các thao tác ngắt liên kết, tạo lại hồ sơ và dọn hồ sơ không còn gắn với tài khoản đều yêu cầu xác nhận. Hồ sơ cũ được chuyển vào `codex_profiles/.archived/` thay vì xóa vĩnh viễn, nên có thể khôi phục thủ công khi cần.
+
+## Thống kê sử dụng
+
+Tab `Thống kê sử dụng` hiển thị snapshot quota mới nhất theo từng tài khoản: phần trăm đã dùng và còn lại, gói, chu kỳ, thời điểm reset, trạng thái và lần đồng bộ gần nhất.
+
+Phần tổng hợp gồm số tài khoản có hoặc chưa có dữ liệu quota, tài khoản cần đồng bộ lại, dùng được, cần xử lý, quota thấp, hết quota, bình quân, min–max, trung vị, reset gần nhất và phân bổ theo gói. Quota cũ của tài khoản đang cần xử lý không được tính vào tổng hợp. Các giá trị bình quân chỉ tính trên những tài khoản có dữ liệu hiện hành và không phải tổng dung lượng quota tuyệt đối giữa các gói.
+
+Ứng dụng hiện không có dữ liệu token, request hoặc lịch sử theo ngày, vì vậy tab không hiển thị biểu đồ xu hướng hay dự báo tiêu thụ chưa có căn cứ.
+
 ## Tạo shortcut
 
 Chạy PowerShell:
@@ -74,7 +97,11 @@ Tùy chọn `-B` ngăn Python tạo thư mục `__pycache__` trong lúc kiểm t
 - Chỉ các yêu cầu từ loopback hợp lệ mới được dịch vụ chấp nhận.
 - Các thao tác thay đổi dữ liệu được bảo vệ bằng session token và CSRF token.
 - Mật khẩu và secret chỉ được trả về khi người dùng chủ động yêu cầu sao chép.
+- Kết quả xem trước import không chứa mật khẩu hoặc secret.
+- Thao tác vòng đời hồ sơ chỉ lưu trữ hồ sơ trong phạm vi `codex_profiles/`, không xóa vĩnh viễn.
 
 ## Dừng ứng dụng
 
-Đóng tiến trình `pythonw.exe` có command line trỏ tới `run_local_web.py`. Không dừng toàn bộ tiến trình Python trên máy vì có thể ảnh hưởng ứng dụng khác.
+Chọn `Thoát ứng dụng` trên giao diện và xác nhận. Dịch vụ sẽ dừng đồng bộ, đóng phiên cục bộ và kết thúc tiến trình do launcher quản lý.
+
+Nếu giao diện không còn phản hồi, chỉ đóng tiến trình `pythonw.exe` có command line trỏ tới `run_local_web.py`. Không dừng toàn bộ tiến trình Python trên máy vì có thể ảnh hưởng ứng dụng khác.

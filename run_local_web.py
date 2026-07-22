@@ -155,7 +155,17 @@ def main() -> int:
         data_file=Path(DATA_FILE),
         profiles_dir=Path(CODEX_PROFILES_DIR),
     )
-    app = create_app(service)
+    server_holder: dict[str, uvicorn.Server] = {}
+
+    def request_shutdown() -> None:
+        server = server_holder.get("server")
+        if server is not None:
+            server.should_exit = True
+
+    app = create_app(
+        service,
+        shutdown_callback=request_shutdown,
+    )
     save_session_token(service.access_token)
     config = uvicorn.Config(
         app,
@@ -165,6 +175,7 @@ def main() -> int:
         log_level="warning",
     )
     server = uvicorn.Server(config)
+    server_holder["server"] = server
     threading.Thread(
         target=open_browser_when_ready,
         args=(service.access_token,),

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+import threading
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Callable, Literal
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -15,7 +16,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .local_web_service import AccountNotFoundError, LocalWebService
+from .local_web_profiles import UnsafeProfilePathError
+from .local_web_service import (
+    AccountNotFoundError,
+    ImportPreviewConflictError,
+    ImportPreviewError,
+    LocalWebService,
+)
 from .otp_codex_manager_with_account_status import (
     CODEX_PROFILES_DIR,
     DATA_FILE,
@@ -40,10 +47,64 @@ class AccountState(BaseModel):
     last_sync: str
 
 
+class AccountRecommendation(BaseModel):
+    account_id: str
+    email: str
+    quota_remaining: str
+    quota_reset_at: str
+
+
+class AccountUsageStatistics(BaseModel):
+    account_id: str
+    email: str
+    quota_remaining_percent: float | None
+    quota_used_percent: float | None
+    quota_cycle: str
+    quota_reset_at: str
+    plan_type: str
+    account_state: str
+    sync_status: str
+    last_sync: str
+    is_usable: bool
+    needs_attention: bool
+    quota_is_stale: bool
+
+
+class PlanUsageCount(BaseModel):
+    plan_type: str
+    count: int
+
+
+class UsageStatistics(BaseModel):
+    schema_version: Literal[1]
+    history_available: Literal[False]
+    source: Literal["codex_rate_limits_snapshot"]
+    generated_at: str
+    total_accounts: int
+    quota_known_accounts: int
+    quota_unknown_accounts: int
+    stale_quota_accounts: int
+    usable_accounts: int
+    attention_accounts: int
+    low_quota_accounts: int
+    exhausted_accounts: int
+    average_remaining_percent: float | None
+    average_used_percent: float | None
+    minimum_remaining_percent: float | None
+    maximum_remaining_percent: float | None
+    median_remaining_percent: float | None
+    next_reset_at: str | None
+    plan_distribution: list[PlanUsageCount]
+    accounts: list[AccountUsageStatistics]
+
+
 class StateResponse(BaseModel):
     accounts: list[AccountState]
     sync_status: str
     refresh_interval_seconds: int
+    orphan_profile_count: int
+    recommendation: AccountRecommendation | None
+    usage_statistics: UsageStatistics
 
 
 class BootstrapResponse(BaseModel):
@@ -51,8 +112,32 @@ class BootstrapResponse(BaseModel):
     state: StateResponse
 
 
-class ImportAccountsRequest(BaseModel):
+class ImportPreviewRequest(BaseModel):
     lines: str = Field(min_length=1, max_length=100_000)
+
+
+class ImportChange(BaseModel):
+    email: str
+    action: Literal["add", "update"]
+
+
+class ImportPreviewCounts(BaseModel):
+    added: int
+    updated: int
+    duplicates: int
+    errors: int
+
+
+class ImportPreviewResponse(BaseModel):
+    preview_token: str
+    counts: ImportPreviewCounts
+    changes: list[ImportChange]
+    errors: list[str]
+
+
+class ApplyImportRequest(BaseModel):
+    preview_token: str = Field(min_length=32, max_length=128)
+    reject_on_errors: bool = False
 
 
 class ImportAccountsResponse(BaseModel):
@@ -85,6 +170,10 @@ class RefreshRequest(BaseModel):
 
 class ActionResponse(BaseModel):
     accepted: bool
+
+
+class ArchiveProfilesResponse(BaseModel):
+    archived: int
 
 
 class HealthResponse(BaseModel):
@@ -178,12 +267,15 @@ def _host_is_local_authority(host_header: str) -> bool:
 def create_app(
     service: LocalWebService | None = None,
     assets_dir: Path = ASSETS_DIR,
+    shutdown_callback: Callable[[], None] | None = None,
 ) -> FastAPI:
     active_service = service or LocalWebService(
         data_file=DATA_FILE,
         profiles_dir=CODEX_PROFILES_DIR,
     )
     rate_limiter = LocalWriteRateLimiter()
+    shutdown_lock = threading.Lock()
+    shutdown_requested = False
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -322,18 +414,41 @@ def create_app(
         )
 
     @app.post(
+        "/api/accounts/import/preview",
+        response_model=ImportPreviewResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def preview_import(
+        request: ImportPreviewRequest,
+    ) -> ImportPreviewResponse:
+        try:
+            result = active_service.preview_import(request.lines)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
+        return ImportPreviewResponse.model_validate(result)
+
+    @app.post(
         "/api/accounts/import",
         response_model=ImportAccountsResponse,
         dependencies=[Depends(require_csrf)],
     )
     def import_accounts(
-        request: ImportAccountsRequest,
+        request: ApplyImportRequest,
     ) -> ImportAccountsResponse:
         try:
-            result = active_service.import_accounts(
-                request.lines
+            result = active_service.apply_import_preview(
+                request.preview_token,
+                request.reject_on_errors,
             )
-        except ValueError as error:
+        except ImportPreviewConflictError as error:
+            raise HTTPException(
+                status_code=409,
+                detail=str(error),
+            ) from error
+        except ImportPreviewError as error:
             raise HTTPException(
                 status_code=400,
                 detail=str(error),
@@ -421,6 +536,84 @@ def create_app(
                 detail="Không thể mở đăng nhập Codex.",
             ) from error
 
+        return ActionResponse(accepted=True)
+
+    @app.post(
+        "/api/codex/{account_id}/unlink",
+        response_model=ActionResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def unlink_codex(account_id: str) -> ActionResponse:
+        try:
+            active_service.unlink_profile(account_id)
+        except AccountNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Không tìm thấy tài khoản.",
+            ) from error
+        except (OSError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể ngắt liên kết profile an toàn.",
+            ) from error
+        return ActionResponse(accepted=True)
+
+    @app.post(
+        "/api/codex/{account_id}/reset-profile",
+        response_model=ActionResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def reset_codex_profile(account_id: str) -> ActionResponse:
+        try:
+            active_service.reset_profile(account_id)
+        except AccountNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Không tìm thấy tài khoản.",
+            ) from error
+        except (OSError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể đặt lại profile an toàn.",
+            ) from error
+        return ActionResponse(accepted=True)
+
+    @app.post(
+        "/api/profiles/orphans/archive",
+        response_model=ArchiveProfilesResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def archive_orphan_profiles() -> ArchiveProfilesResponse:
+        try:
+            archived = active_service.archive_orphan_profiles()
+        except (OSError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể lưu trữ profile mồ côi an toàn.",
+            ) from error
+        return ArchiveProfilesResponse(archived=archived)
+
+    @app.post(
+        "/api/application/shutdown",
+        response_model=ActionResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def shutdown_application() -> ActionResponse:
+        nonlocal shutdown_requested
+        with shutdown_lock:
+            if shutdown_requested:
+                return ActionResponse(accepted=False)
+            shutdown_requested = True
+        if shutdown_callback is not None:
+            try:
+                shutdown_callback()
+            except Exception as error:
+                with shutdown_lock:
+                    shutdown_requested = False
+                raise HTTPException(
+                    status_code=503,
+                    detail="Không thể gửi yêu cầu thoát ứng dụng.",
+                ) from error
         return ActionResponse(accepted=True)
 
     app.mount(

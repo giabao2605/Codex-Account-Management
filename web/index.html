@@ -34,13 +34,47 @@
         <button class="button button-primary" id="refresh-all" type="button">
           Đồng bộ tất cả
         </button>
+        <button class="button button-danger" id="shutdown-application" type="button">
+          Thoát ứng dụng
+        </button>
       </div>
     </header>
+
+    <nav class="workspace-tabs" role="tablist" aria-label="Khu vực làm việc">
+      <button class="workspace-tab is-active" id="accounts-tab" type="button"
+              role="tab" aria-selected="true" aria-controls="accounts-panel"
+              tabindex="0">
+        Tài khoản
+      </button>
+      <button class="workspace-tab" id="usage-tab" type="button"
+              role="tab" aria-selected="false" aria-controls="usage-panel"
+              tabindex="-1">
+        Thống kê sử dụng
+      </button>
+    </nav>
+
+    <div id="accounts-panel" role="tabpanel" aria-labelledby="accounts-tab">
 
     <section class="summary" aria-label="Tổng quan">
       <article class="summary-card">
         <span class="data-label">Tổng tài khoản</span>
         <strong class="metric-value" id="account-count">0</strong>
+      </article>
+      <article class="summary-card recommendation-summary">
+        <span class="data-label">Tài khoản đề xuất</span>
+        <strong class="metric-value metric-small" id="recommended-account">
+          Chưa có đề xuất
+        </strong>
+      </article>
+      <article class="summary-card summary-card-action">
+        <div>
+          <span class="data-label">Profile mồ côi</span>
+          <strong class="metric-value" id="orphan-profile-count">0</strong>
+        </div>
+        <button class="button button-secondary" id="archive-orphan-profiles"
+                type="button" disabled>
+          Lưu trữ
+        </button>
       </article>
       <article class="summary-card">
         <span class="data-label">Tự làm mới</span>
@@ -118,6 +152,95 @@
       </div>
     </section>
 
+    </div>
+
+    <section class="usage-panel" id="usage-panel" role="tabpanel"
+             aria-labelledby="usage-tab" hidden>
+      <div class="usage-heading">
+        <div>
+          <p class="section-kicker">THỐNG KÊ SỬ DỤNG</p>
+          <h2>Ảnh chụp quota hiện tại</h2>
+        </div>
+        <p class="usage-snapshot" id="usage-snapshot-time">Đang tải dữ liệu</p>
+      </div>
+
+      <p class="usage-disclaimer" id="usage-disclaimer">
+        Đây là ảnh chụp trạng thái hiện tại. Quota cũ của tài khoản cần xử lý
+        không được tính vào tổng hợp. Ứng dụng chưa lưu lịch sử, số token hoặc số request.
+      </p>
+
+      <div class="usage-summary" aria-label="Thống kê tổng hợp">
+        <article class="usage-metric-card">
+          <span class="data-label">Bình quân đã dùng</span>
+          <strong class="metric-value" id="usage-average-used">—</strong>
+          <span class="metric-context">Trên các tài khoản có dữ liệu quota</span>
+        </article>
+        <article class="usage-metric-card">
+          <span class="data-label">Bình quân còn lại</span>
+          <strong class="metric-value" id="usage-average-remaining">—</strong>
+          <span class="metric-context">Trên các tài khoản có dữ liệu quota</span>
+        </article>
+        <article class="usage-metric-card">
+          <span class="data-label">Có dữ liệu quota</span>
+          <strong class="metric-value" id="usage-known-count">0 / 0</strong>
+          <span class="metric-context" id="usage-unknown-count">0 chưa có dữ liệu</span>
+          <span class="metric-context" id="usage-stale-count">0 cần đồng bộ lại</span>
+        </article>
+        <article class="usage-metric-card">
+          <span class="data-label">Cần xử lý</span>
+          <strong class="metric-value" id="usage-attention-count">0</strong>
+        </article>
+        <article class="usage-metric-card">
+          <span class="data-label">Dùng được</span>
+          <strong class="metric-value" id="usage-usable-count">0</strong>
+        </article>
+        <article class="usage-metric-card">
+          <span class="data-label">Quota thấp / hết</span>
+          <strong class="metric-value" id="usage-low-count">0 / 0</strong>
+        </article>
+      </div>
+
+      <dl class="usage-details" aria-label="Chi tiết snapshot">
+        <div>
+          <dt>Khoảng quota còn lại</dt>
+          <dd id="usage-range">—</dd>
+        </div>
+        <div>
+          <dt>Trung vị còn lại</dt>
+          <dd id="usage-median">—</dd>
+        </div>
+        <div>
+          <dt>Reset gần nhất</dt>
+          <dd id="usage-next-reset">—</dd>
+        </div>
+        <div>
+          <dt>Phân bổ gói</dt>
+          <dd id="usage-plan-distribution">—</dd>
+        </div>
+      </dl>
+
+      <div class="usage-table-wrap">
+        <table class="usage-table">
+          <caption class="visually-hidden">Thống kê quota theo từng tài khoản</caption>
+          <thead>
+            <tr>
+              <th scope="col">Tài khoản</th>
+              <th scope="col">Gói</th>
+              <th scope="col">Đã dùng</th>
+              <th scope="col">Còn lại</th>
+              <th scope="col">Trạng thái</th>
+              <th scope="col">Reset quota</th>
+              <th scope="col">Đồng bộ cuối</th>
+            </tr>
+          </thead>
+          <tbody id="usage-account-rows"></tbody>
+        </table>
+        <p class="empty-usage" id="usage-empty" hidden>
+          Chưa có tài khoản để thống kê.
+        </p>
+      </div>
+    </section>
+
     <footer class="privacy-note">
       Ứng dụng chỉ chạy trên máy này. Dữ liệu nhạy cảm chỉ được lấy khi bạn chủ động sao chép.
     </footer>
@@ -148,12 +271,24 @@
           Dữ liệu được mã hóa bằng tài khoản Windows hiện tại trước khi lưu.
         </p>
         <div class="import-result" id="import-result" aria-live="polite"></div>
+        <div class="import-preview" id="import-preview" hidden>
+          <p class="preview-heading">Bản xem trước</p>
+          <dl class="preview-counts" id="preview-counts"></dl>
+          <ul class="preview-changes" id="preview-changes"></ul>
+        </div>
+        <label class="checkbox-field" for="reject-on-errors">
+          <input id="reject-on-errors" type="checkbox" checked>
+          <span>Không lưu nếu có bất kỳ dòng lỗi nào</span>
+        </label>
         <div class="dialog-actions">
           <button class="button button-secondary" id="cancel-import" type="button">
             Hủy
           </button>
-          <button class="button button-primary" id="import-accounts" type="button">
-            Lưu tài khoản
+          <button class="button button-secondary" id="preview-import" type="button">
+            Xem trước
+          </button>
+          <button class="button button-primary" id="import-accounts" type="button" disabled>
+            Xác nhận lưu
           </button>
         </div>
       </div>

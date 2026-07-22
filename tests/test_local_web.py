@@ -1,4 +1,5 @@
 import os
+import json
 import socket
 import tempfile
 import threading
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from app.build_info import API_SCHEMA_VERSION, APP_BUILD_ID
 from app.local_web_app import create_app
 from app.local_web_profiles import (
     UnsafeProfilePathError,
@@ -16,7 +18,15 @@ from app.local_web_profiles import (
 )
 from app.local_web_service import LocalWebService, account_display_sort_key
 from app.otp_codex_manager_with_account_status import CodexInfo
-from run_local_web import reserve_local_socket
+from run_local_web import (
+    existing_app_is_running,
+    main as run_local_web_main,
+    open_browser_when_ready,
+    read_existing_build_id,
+    request_existing_app_shutdown,
+    reserve_local_socket,
+    reserve_socket_after_shutdown,
+)
 
 
 class LocalWebApiTests(unittest.TestCase):
@@ -79,7 +89,14 @@ class LocalWebApiTests(unittest.TestCase):
         response = self.client.get("/api/health")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "ok",
+                "api_schema_version": API_SCHEMA_VERSION,
+                "build_id": APP_BUILD_ID,
+            },
+        )
         self.assertIn(
             "default-src 'self'",
             response.headers["content-security-policy"],
@@ -90,6 +107,12 @@ class LocalWebApiTests(unittest.TestCase):
         )
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(response.headers["x-otp-codex-app"], "1")
+        bootstrap = self.client.get("/api/bootstrap").json()
+        self.assertEqual(
+            bootstrap["api_schema_version"],
+            API_SCHEMA_VERSION,
+        )
+        self.assertEqual(bootstrap["build_id"], APP_BUILD_ID)
         self.assertEqual(
             self.client.get("/api/state").json()[
                 "refresh_interval_seconds"
@@ -345,8 +368,23 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertIn('event.key === "ArrowRight"', script)
         self.assertIn('event.key === "ArrowLeft"', script)
         self.assertIn("usage_statistics", script)
+        self.assertIn("expectedApiSchemaVersion", script)
+        self.assertIn("Dịch vụ nền đang dùng phiên bản cũ", script)
+        self.assertIn("backendCompatible", script)
         self.assertIn(".workspace-tabs", styles)
         self.assertIn(".usage-table", styles)
+
+    def test_frontend_explains_recommendation_and_profile_actions(
+        self,
+    ) -> None:
+        page = self.client.get("/").text
+        script = self.client.get("/assets/app.js").text
+
+        self.assertIn("Tài khoản khỏe, còn quota cao nhất", page)
+        self.assertIn("Profile không còn dùng", page)
+        self.assertIn("Thư mục đăng nhập cũ", page)
+        self.assertIn("Giữ tài khoản trong danh sách", script)
+        self.assertIn("tạo profile trống", script)
 
     def test_rejects_non_loopback_client(self) -> None:
         remote_client = TestClient(
@@ -1158,6 +1196,191 @@ class LocalWebApiTests(unittest.TestCase):
                     reserve_local_socket()
             finally:
                 first_socket.close()
+
+    def test_launcher_rejects_running_app_with_stale_build(self) -> None:
+        with patch(
+            "run_local_web.read_existing_build_id",
+            return_value="stale-build",
+        ):
+            self.assertFalse(existing_app_is_running("session-token"))
+
+    def test_launcher_accepts_authenticated_current_build(self) -> None:
+        class FakeResponse:
+            status = 200
+            headers = {"X-OTP-Codex-App": "1"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                return None
+
+        with (
+            patch(
+                "run_local_web.read_existing_build_id",
+                return_value=APP_BUILD_ID,
+            ),
+            patch(
+                "run_local_web.urllib.request.urlopen",
+                return_value=FakeResponse(),
+            ) as urlopen,
+        ):
+            self.assertTrue(existing_app_is_running("session-token"))
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.get_header("Authorization"),
+            "Bearer session-token",
+        )
+
+    def test_launcher_reads_current_build_from_health(self) -> None:
+        class FakeResponse:
+            status = 200
+            headers = {"X-OTP-Codex-App": "1"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps(
+                    {"status": "ok", "build_id": APP_BUILD_ID}
+                ).encode("utf-8")
+
+        with patch(
+            "run_local_web.urllib.request.urlopen",
+            return_value=FakeResponse(),
+        ):
+            self.assertEqual(read_existing_build_id(), APP_BUILD_ID)
+
+    def test_launcher_opens_browser_only_for_current_build(self) -> None:
+        class FakeResponse:
+            status = 200
+            headers = {"X-OTP-Codex-App": "1"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps(
+                    {"status": "ok", "build_id": APP_BUILD_ID}
+                ).encode("utf-8")
+
+        with (
+            patch(
+                "run_local_web.urllib.request.urlopen",
+                return_value=FakeResponse(),
+            ),
+            patch("run_local_web.webbrowser.open") as open_browser,
+        ):
+            open_browser_when_ready("session-token")
+
+        open_browser.assert_called_once_with(
+            "http://127.0.0.1:8765/#session-token"
+        )
+
+    def test_launcher_requests_authenticated_shutdown_for_stale_app(
+        self,
+    ) -> None:
+        class FakeResponse:
+            def __init__(self, payload: dict) -> None:
+                self.status = 200
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps(self.payload).encode("utf-8")
+
+        responses = (
+            FakeResponse({"csrf_token": "csrf-token"}),
+            FakeResponse({"accepted": True}),
+        )
+        with patch(
+            "run_local_web.urllib.request.urlopen",
+            side_effect=responses,
+        ) as urlopen:
+            self.assertTrue(
+                request_existing_app_shutdown("session-token")
+            )
+
+        shutdown_request = urlopen.call_args_list[1].args[0]
+        self.assertEqual(shutdown_request.get_method(), "POST")
+        self.assertTrue(
+            shutdown_request.full_url.endswith(
+                "/api/application/shutdown"
+            )
+        )
+        self.assertEqual(
+            shutdown_request.get_header("Authorization"),
+            "Bearer session-token",
+        )
+        self.assertEqual(
+            shutdown_request.get_header("X-csrf-token"),
+            "csrf-token",
+        )
+
+    def test_launcher_waits_for_port_release_after_shutdown(self) -> None:
+        reserved_socket = object()
+        with (
+            patch(
+                "run_local_web.reserve_local_socket",
+                side_effect=(OSError(), reserved_socket),
+            ),
+            patch("run_local_web.time.sleep") as sleep,
+        ):
+            result = reserve_socket_after_shutdown()
+
+        self.assertIs(result, reserved_socket)
+        sleep.assert_called_once_with(0.1)
+
+    def test_launcher_reuses_fresh_app_when_restart_races(self) -> None:
+        with (
+            patch("run_local_web.ensure_standard_streams"),
+            patch(
+                "run_local_web.reserve_local_socket",
+                side_effect=OSError(),
+            ),
+            patch(
+                "run_local_web.load_session_token",
+                side_effect=("old-token", "fresh-token"),
+            ),
+            patch(
+                "run_local_web.read_existing_build_id",
+                return_value="stale-build",
+            ),
+            patch(
+                "run_local_web.request_existing_app_shutdown",
+                return_value=True,
+            ),
+            patch(
+                "run_local_web.reserve_socket_after_shutdown",
+                return_value=None,
+            ),
+            patch(
+                "run_local_web.existing_app_is_running",
+                return_value=True,
+            ) as app_is_running,
+            patch("run_local_web.webbrowser.open") as open_browser,
+            patch("run_local_web.show_startup_error") as startup_error,
+        ):
+            result = run_local_web_main()
+
+        self.assertEqual(result, 0)
+        app_is_running.assert_called_once_with("fresh-token")
+        open_browser.assert_called_once_with(
+            "http://127.0.0.1:8765/#fresh-token"
+        )
+        startup_error.assert_not_called()
 
 
 if __name__ == "__main__":

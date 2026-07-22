@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .build_info import API_SCHEMA_VERSION, APP_BUILD_ID
 from .local_web_profiles import UnsafeProfilePathError
 from .local_web_service import (
     AccountNotFoundError,
@@ -108,6 +109,8 @@ class StateResponse(BaseModel):
 
 
 class BootstrapResponse(BaseModel):
+    api_schema_version: int
+    build_id: str
     csrf_token: str
     state: StateResponse
 
@@ -178,6 +181,8 @@ class ArchiveProfilesResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: Literal["ok"]
+    api_schema_version: int
+    build_id: str
 
 
 class LocalWriteRateLimiter:
@@ -396,11 +401,17 @@ def create_app(
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse(status="ok")
+        return HealthResponse(
+            status="ok",
+            api_schema_version=API_SCHEMA_VERSION,
+            build_id=APP_BUILD_ID,
+        )
 
     @app.get("/api/bootstrap", response_model=BootstrapResponse)
     def bootstrap() -> BootstrapResponse:
         return BootstrapResponse(
+            api_schema_version=API_SCHEMA_VERSION,
+            build_id=APP_BUILD_ID,
             csrf_token=active_service.csrf_token,
             state=StateResponse.model_validate(
                 active_service.state()

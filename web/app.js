@@ -59,6 +59,7 @@ const ui = {
 
 const themeStorageKey = "otp-codex-theme";
 const tokenStorageKey = "otp-codex-access-token";
+const expectedApiSchemaVersion = 2;
 const fragmentToken = window.location.hash.slice(1);
 if (fragmentToken) {
   window.sessionStorage.setItem(tokenStorageKey, fragmentToken);
@@ -74,6 +75,7 @@ let importPreviewToken = "";
 let previewRequestId = 0;
 let pollTimer = 0;
 let applicationStopping = false;
+let backendCompatible = false;
 
 function applyTheme(theme, options = {}) {
   const normalizedTheme = theme === "light" ? "light" : "dark";
@@ -118,6 +120,7 @@ function actionButton(label, action, accountId, options = {}) {
   node.dataset.accountId = accountId;
   if (options.field) node.dataset.field = options.field;
   if (options.ariaLabel) node.setAttribute("aria-label", options.ariaLabel);
+  if (options.title) node.title = options.title;
   return node;
 }
 
@@ -322,9 +325,11 @@ function createAccountCard(account) {
     }),
     actionButton("Ngắt liên kết", "unlink", account.id, {
       ariaLabel: `Ngắt liên kết Codex của ${account.email}`,
+      title: "Giữ tài khoản trong danh sách và lưu trữ profile đăng nhập hiện tại.",
     }),
     actionButton("Đặt lại profile", "reset-profile", account.id, {
       ariaLabel: `Đặt lại profile Codex của ${account.email}`,
+      title: "Lưu trữ profile hiện tại và tạo profile trống để liên kết lại.",
     }),
   );
   const deleteButton = actionButton("Xóa tài khoản", "delete", account.id, {
@@ -666,6 +671,15 @@ async function api(path, options = {}) {
 async function bootstrap() {
   try {
     const payload = await api("/api/bootstrap");
+    if (payload.api_schema_version !== expectedApiSchemaVersion) {
+      backendCompatible = false;
+      const versionError = new Error(
+        "Dịch vụ nền đang dùng phiên bản cũ. Hãy đóng OTP Codex Local và mở lại.",
+      );
+      versionError.code = "BACKEND_VERSION_MISMATCH";
+      throw versionError;
+    }
+    backendCompatible = true;
     csrfToken = payload.csrf_token;
     renderState(payload.state);
   } catch (error) {
@@ -674,7 +688,7 @@ async function bootstrap() {
 }
 
 async function pollState() {
-  if (applicationStopping || pollInProgress) return;
+  if (!backendCompatible || applicationStopping || pollInProgress) return;
   pollInProgress = true;
   try {
     renderState(await api("/api/state"));
@@ -686,9 +700,17 @@ async function pollState() {
 }
 
 function setOffline(error) {
-  ui.connection.textContent = "Mất kết nối";
+  const versionMismatch = error.code === "BACKEND_VERSION_MISMATCH";
+  ui.connection.textContent = versionMismatch
+    ? "Cần khởi động lại"
+    : "Mất kết nối";
   ui.connection.className = "connection is-offline";
   ui.lastUpdated.textContent = `Không thể cập nhật: ${error.message}`;
+  if (versionMismatch) {
+    ui.openImport.disabled = true;
+    ui.refreshAll.disabled = true;
+    ui.shutdownApplication.disabled = true;
+  }
 }
 
 async function copyText(value, label) {

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import uvicorn
 
+from app.build_info import APP_BUILD_ID
 from app.local_web_app import create_app
 from app.local_web_service import LocalWebService
 from app.otp_codex_manager_with_account_status import (
@@ -98,6 +99,8 @@ def save_session_token(token: str) -> None:
 
 
 def existing_app_is_running(token: str) -> bool:
+    if read_existing_build_id() != APP_BUILD_ID:
+        return False
     try:
         request = urllib.request.Request(
             f"{URL}/api/state",
@@ -115,6 +118,67 @@ def existing_app_is_running(token: str) -> bool:
         return False
 
 
+def read_existing_build_id() -> str | None:
+    try:
+        with urllib.request.urlopen(
+            f"{URL}/api/health",
+            timeout=1.5,
+        ) as response:
+            if (
+                response.status != 200
+                or response.headers.get("X-OTP-Codex-App") != "1"
+            ):
+                return None
+            payload = json.load(response)
+            build_id = payload.get("build_id")
+            return build_id if isinstance(build_id, str) else ""
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def request_existing_app_shutdown(token: str) -> bool:
+    authorization = f"Bearer {token}"
+    try:
+        bootstrap_request = urllib.request.Request(
+            f"{URL}/api/bootstrap",
+            headers={"Authorization": authorization},
+        )
+        with urllib.request.urlopen(
+            bootstrap_request,
+            timeout=2,
+        ) as response:
+            csrf_token = json.load(response).get("csrf_token")
+        if not isinstance(csrf_token, str) or not csrf_token:
+            return False
+
+        shutdown_request = urllib.request.Request(
+            f"{URL}/api/application/shutdown",
+            data=b"",
+            method="POST",
+            headers={
+                "Authorization": authorization,
+                "Origin": URL,
+                "X-CSRF-Token": csrf_token,
+            },
+        )
+        with urllib.request.urlopen(
+            shutdown_request,
+            timeout=2,
+        ) as response:
+            return response.status == 200
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def reserve_socket_after_shutdown() -> socket.socket | None:
+    for _ in range(50):
+        try:
+            return reserve_local_socket()
+        except OSError:
+            time.sleep(0.1)
+    return None
+
+
 def open_browser_when_ready(token: str) -> None:
     for _ in range(180):
         try:
@@ -125,10 +189,11 @@ def open_browser_when_ready(token: str) -> None:
                 if (
                     response.status == 200
                     and response.headers.get("X-OTP-Codex-App") == "1"
+                    and json.load(response).get("build_id") == APP_BUILD_ID
                 ):
                     webbrowser.open(f"{URL}/#{token}")
                     return
-        except OSError:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
             time.sleep(0.25)
 
 
@@ -138,18 +203,37 @@ def main() -> int:
         server_socket = reserve_local_socket()
     except OSError:
         existing_token = load_session_token()
+        existing_build_id = read_existing_build_id()
         if (
             existing_token is not None
+            and existing_build_id == APP_BUILD_ID
             and existing_app_is_running(existing_token)
         ):
             webbrowser.open(f"{URL}/#{existing_token}")
             return 0
 
-        show_startup_error(
-            f"Không thể mở cổng {PORT}. Có thể ứng dụng đang chạy. "
-            "Hãy đóng chương trình đang dùng cổng này rồi thử lại."
-        )
-        return 1
+        if existing_token is not None and existing_build_id is not None:
+            request_existing_app_shutdown(existing_token)
+            server_socket = reserve_socket_after_shutdown()
+            if server_socket is None:
+                fresh_token = load_session_token()
+                if (
+                    fresh_token is not None
+                    and existing_app_is_running(fresh_token)
+                ):
+                    webbrowser.open(f"{URL}/#{fresh_token}")
+                    return 0
+                show_startup_error(
+                    "Ứng dụng nền đang dùng phiên bản cũ và không thể tự "
+                    "khởi động lại. Hãy đóng OTP Codex Local rồi mở lại."
+                )
+                return 1
+        else:
+            show_startup_error(
+                f"Không thể mở cổng {PORT}. Có thể ứng dụng đang chạy. "
+                "Hãy đóng chương trình đang dùng cổng này rồi thử lại."
+            )
+            return 1
 
     service = LocalWebService(
         data_file=Path(DATA_FILE),

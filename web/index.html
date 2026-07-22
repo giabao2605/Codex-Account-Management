@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1020">
+  <title>OTP Codex Local</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <h1>Tài khoản Codex</h1>
+        <p class="subtitle">Lấy OTP, theo dõi quota và đồng bộ tài khoản tại một nơi.</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="connection" id="connection-status" aria-live="polite">
+          Đang kết nối
+        </div>
+        <button class="button button-secondary" id="open-import" type="button">
+          Thêm tài khoản
+        </button>
+        <button class="button button-primary" id="refresh-all" type="button">
+          Đồng bộ tất cả
+        </button>
+      </div>
+    </header>
+
+    <section class="summary" aria-label="Tổng quan">
+      <article class="summary-card">
+        <span class="data-label">Tổng tài khoản</span>
+        <strong class="metric-value" id="account-count">0</strong>
+      </article>
+      <article class="summary-card">
+        <span class="data-label">Tự làm mới</span>
+        <strong class="metric-value metric-small" id="refresh-interval">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="data-label">Cập nhật gần nhất</span>
+        <strong class="metric-value metric-small" id="last-updated">
+          Đang tải
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span class="data-label">Đồng bộ thành công</span>
+        <strong class="metric-value metric-small" id="sync-success-ratio">
+          0 / 0
+        </strong>
+      </article>
+    </section>
+
+    <section class="sync-overview" aria-labelledby="sync-heading">
+      <p class="data-label" id="sync-heading">Chi tiết đồng bộ</p>
+      <p class="visually-hidden" id="sync-status" aria-live="polite">
+        Đang kiểm tra trạng thái tài khoản
+      </p>
+      <dl class="sync-breakdown">
+        <div class="sync-item sync-item-success">
+          <dt>Thành công</dt>
+          <dd id="sync-success-count">0</dd>
+        </div>
+        <div class="sync-item sync-item-warning">
+          <dt>Cần đăng nhập</dt>
+          <dd id="sync-login-count">0</dd>
+        </div>
+        <div class="sync-item sync-item-warning">
+          <dt>Chưa liên kết</dt>
+          <dd id="sync-unlinked-count">0</dd>
+        </div>
+        <div class="sync-item sync-item-error">
+          <dt>Lỗi tạm thời</dt>
+          <dd id="sync-error-count">0</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="accounts-section" aria-labelledby="accounts-heading">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">TÀI KHOẢN</p>
+          <div class="heading-line">
+            <h2 id="accounts-heading">Danh sách đang quản lý</h2>
+            <span class="result-count" id="visible-account-count">0 / 0</span>
+          </div>
+        </div>
+        <div class="dashboard-toolbar">
+          <label class="visually-hidden" for="account-filter">Lọc danh sách tài khoản</label>
+          <select id="account-filter">
+            <option value="all">Tất cả tài khoản</option>
+            <option value="usable">Tài khoản còn dùng được</option>
+            <option value="attention">Cần xử lý</option>
+            <option value="quota-available">Còn quota</option>
+            <option value="quota-low">Quota sắp hết (1–20%)</option>
+            <option value="quota-empty">Hết quota</option>
+            <option value="quota-unknown">Chưa có dữ liệu quota</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="account-grid" id="account-grid"></div>
+      <div class="empty-state" id="empty-state">
+        <h3>Chưa có tài khoản</h3>
+        <p>Thêm tài khoản đầu tiên để bắt đầu lấy OTP và theo dõi quota.</p>
+        <button class="button button-primary" type="button" data-open-import>
+          Thêm tài khoản
+        </button>
+      </div>
+    </section>
+
+    <footer class="privacy-note">
+      Ứng dụng chỉ chạy trên máy này. Dữ liệu nhạy cảm chỉ được lấy khi bạn chủ động sao chép.
+    </footer>
+  </main>
+
+  <dialog class="account-dialog" id="account-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-panel">
+      <div class="dialog-header">
+        <div>
+          <p class="section-kicker">THÊM TÀI KHOẢN</p>
+          <h2 id="dialog-title">Thêm hoặc cập nhật</h2>
+        </div>
+        <button class="button button-quiet" id="close-import" type="button">
+          Đóng
+        </button>
+      </div>
+
+      <div class="import-content">
+        <label for="account-lines">Thông tin tài khoản</label>
+        <p class="field-hint" id="account-format">
+          Mỗi dòng theo định dạng: email|password|secret
+        </p>
+        <textarea id="account-lines" rows="7" spellcheck="false"
+                  autocomplete="off" autocapitalize="off"
+                  aria-describedby="account-format account-security"
+                  placeholder="user@example.com|password|TOTP_SECRET"></textarea>
+        <p class="security-note" id="account-security">
+          Dữ liệu được mã hóa bằng tài khoản Windows hiện tại trước khi lưu.
+        </p>
+        <div class="import-result" id="import-result" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button class="button button-secondary" id="cancel-import" type="button">
+            Hủy
+          </button>
+          <button class="button button-primary" id="import-accounts" type="button">
+            Lưu tài khoản
+          </button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

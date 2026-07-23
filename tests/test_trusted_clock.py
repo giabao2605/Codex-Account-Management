@@ -40,6 +40,11 @@ class _Response:
 
 
 class TrustedClockTests(unittest.TestCase):
+    def test_default_refresh_interval_is_one_minute(self) -> None:
+        clock = TrustedClock(sources=("https://one",))
+
+        self.assertEqual(clock.refresh_interval_seconds, 60.0)
+
     def test_sync_uses_median_and_rejects_outlier(self) -> None:
         source = _ClockSource()
         dates = iter((1_120.0, 1_122.0, 6_000.0))

@@ -17,6 +17,7 @@ DEFAULT_TIME_SOURCES = (
     "https://www.microsoft.com/",
 )
 TIME_SOURCES_ENV = "OTP_TIME_SOURCES"
+DEFAULT_REFRESH_INTERVAL_SECONDS = 60.0
 
 
 class _Response(Protocol):
@@ -52,7 +53,7 @@ class TrustedClock:
         *,
         sources: tuple[str, ...] | None = None,
         timeout_seconds: float = 2.0,
-        refresh_interval_seconds: float = 300.0,
+        refresh_interval_seconds: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
         maximum_rtt_seconds: float = 2.0,
         maximum_offset_seconds: float = 86_400.0,
         wall_time: Callable[[], float] = time.time,

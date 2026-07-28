@@ -32,7 +32,6 @@ otp_codex/
 ├── docs/                Baseline, parity matrix và tài liệu kỹ thuật
 ├── frontend/            Source Vue/Vite production
 ├── web-dist/            Production build với hashed assets
-├── web/                 Frontend legacy chỉ dùng để rollback
 ├── codex_profiles/      Hồ sơ Codex cục bộ, không đưa lên Git
 ├── accounts.json        Dữ liệu tài khoản được mã hóa
 ├── .web_session.json    Phiên truy cập cục bộ được mã hóa
@@ -47,7 +46,7 @@ Functional parity trước cutover được ghi tại
 [`docs/liquid-glass-phase3-functional-parity.md`](docs/liquid-glass-phase3-functional-parity.md).
 Kiến trúc Liquid Glass, fallback và performance gate nằm tại
 [`docs/liquid-glass-phase4-glass-system.md`](docs/liquid-glass-phase4-glass-system.md).
-Quyết định production cutover và rollback nằm tại
+Quyết định production cutover nằm tại
 [`docs/liquid-glass-phase5-production-cutover.md`](docs/liquid-glass-phase5-production-cutover.md).
 Kết quả khôi phục parity, baseline PC và acceptance gate hiện hành nằm tại
 [`docs/liquid-glass-phase6-parity-recovery.md`](docs/liquid-glass-phase6-parity-recovery.md).
@@ -68,7 +67,7 @@ python run_local_web.py
 
 Ứng dụng sẽ mở trình duyệt tại `http://127.0.0.1:8765` sau khi dịch vụ sẵn sàng. Nếu ứng dụng đã chạy, launcher sẽ mở lại trang đang hoạt động thay vì tạo thêm dịch vụ trên cùng cổng.
 
-Launcher mặc định phục vụ Vue Liquid Glass từ `web-dist/`. Không cần chạy
+Launcher phục vụ Vue Liquid Glass từ `web-dist/`. Không cần chạy
 Vite dev server hoặc mở thêm cổng khi sử dụng hằng ngày.
 
 ## Build lại frontend production
@@ -81,24 +80,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_frontend.ps1
 
 Script cài đúng dependency theo `package-lock.json`, typecheck, build vào
 `web-dist/`, từ chối source map production và dừng ngay nếu bundle không đầy đủ.
-
-## Rollback tạm thời sang giao diện cũ
-
-Nếu cần khôi phục giao diện legacy trong lúc xử lý sự cố, mở PowerShell tại
-project và chạy:
-
-```powershell
-$env:OTP_CODEX_FRONTEND = "legacy"
-python run_local_web.py
-```
-
-Launcher dùng fingerprint riêng cho mode legacy nên sẽ tự dừng phiên Vue đang
-chạy rồi mở lại đúng giao diện cũ. Để trở lại Vue trong cùng cửa sổ PowerShell:
-
-```powershell
-Remove-Item Env:OTP_CODEX_FRONTEND -ErrorAction SilentlyContinue
-python run_local_web.py
-```
 
 ## Chuyển giao diện
 

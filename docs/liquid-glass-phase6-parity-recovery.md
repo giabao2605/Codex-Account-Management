@@ -1,5 +1,8 @@
 # Phase 6: Baseline parity recovery
 
+> Cập nhật 2026-07-28: frontend legacy và chế độ rollback đã được xóa; Vue/Vite
+> trong `frontend/` và bundle `web-dist/` là frontend duy nhất.
+
 Ngày thực hiện: 2026-07-24
 
 ## Phạm vi
@@ -8,9 +11,8 @@ Phase 6 giữ nguyên kiến trúc Vue 3, Pinia, Vite và hệ Liquid Glass hi�
 khôi phục mật độ thông tin UI/UX từ giao diện cũ cho PC. Mobile không phải gate
 theo quyết định hiện tại.
 
-Không thay đổi schema API, database, cơ chế mã hóa credential hoặc rollback
-legacy. `web/` tiếp tục là artifact rollback; frontend production mặc định vẫn
-lấy từ `web-dist`.
+Không thay đổi schema API, database hoặc cơ chế mã hóa credential. Frontend
+production lấy từ `web-dist`.
 
 ## Parity đã khôi phục
 
@@ -38,8 +40,7 @@ lấy từ `web-dist`.
 - Import preview token chỉ dùng một lần; sau lỗi apply phải preview lại.
 - Token usage request được dedupe, kể cả khi người dùng bấm làm mới trong lúc
   request đang chạy.
-- API mutation vẫn cần Bearer token và CSRF như Phase 5; rollback legacy không
-  bypass các rule này.
+- API mutation vẫn cần Bearer token và CSRF như Phase 5.
 
 ## Visual baseline
 
@@ -76,10 +77,6 @@ Gate cuối ngày 24/07/2026:
 - PowerShell parser và `git diff --check`: pass.
 - Live canary: health schema 5 và Vue fingerprint `1d81579ea6abf62b` khớp
   production build hiện hành tại `http://127.0.0.1:8765`.
-- Rollback live sang legacy fingerprint `33ff56d2bcaaf661` thành công, sau đó
-  launcher chuyển lại Vue. Contract test cũng xác nhận legacy phục vụ `web/`
-  không cần Vue assets.
-
 ## Caveat không chặn
 
 - `npm ci` vẫn cảnh báo deprecation cho dependency bắc cầu `glob@10.5.0`; audit

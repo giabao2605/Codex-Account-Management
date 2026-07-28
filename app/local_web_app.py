@@ -22,7 +22,6 @@ from .build_info import (
     APP_BUILD_ID,
     FRONTEND_ASSETS_DIR,
     FRONTEND_STATIC_ASSETS_DIR,
-    PROJECT_ROOT,
 )
 from .local_web_accounts import AccountConflictError
 from .local_web_profiles import UnsafeProfilePathError
@@ -33,7 +32,6 @@ from .otp_codex_manager_with_account_status import (
 )
 
 
-LEGACY_ASSETS_DIR = PROJECT_ROOT / "web"
 ASSETS_DIR = FRONTEND_ASSETS_DIR
 STATIC_ASSETS_DIR = FRONTEND_STATIC_ASSETS_DIR
 LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}

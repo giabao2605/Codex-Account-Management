@@ -1,5 +1,8 @@
 # Phase 5: Production cutover
 
+> Cập nhật 2026-07-28: frontend legacy và chế độ rollback đã được xóa sau khi
+> Vue/Vite ổn định.
+
 Ngày thực hiện: 2026-07-24
 
 ## Phạm vi
@@ -11,16 +14,12 @@ regression ngoài ý muốn nhưng mobile không phải release gate.
 
 ## Runtime contract
 
-- `app.build_info` chọn mode `vue` mặc định và mode `legacy` chỉ khi
-  `OTP_CODEX_FRONTEND=legacy`.
+- `app.build_info` luôn phục vụ frontend Vue từ `web-dist`.
 - Vue phục vụ `web-dist/index.html` và mount `/assets` trực tiếp vào
   `web-dist/assets`; build thiếu index, thư mục assets hoặc referenced asset sẽ
   fail-fast trước khi service bắt đầu.
-- Build fingerprint hash toàn bộ bundle đang được phục vụ và tên frontend mode.
-  Đổi bundle hoặc chuyển Vue/legacy buộc launcher nhận diện build mới, dừng phiên
-  cũ an toàn rồi khởi động lại.
-- `web/` được giữ nguyên làm rollback artifact trong Phase 5, không còn là
-  frontend mặc định.
+- Build fingerprint hash toàn bộ bundle đang được phục vụ. Đổi bundle buộc
+  launcher nhận diện build mới, dừng phiên cũ an toàn rồi khởi động lại.
 - `scripts/build_frontend.ps1` dùng `npm ci`, typecheck qua script build, tạo
   hashed production assets và từ chối source map.
 
@@ -49,22 +48,8 @@ Chạy production:
 python run_local_web.py
 ```
 
-Rollback tạm thời:
-
-```powershell
-$env:OTP_CODEX_FRONTEND = "legacy"
-python run_local_web.py
-```
-
-Trở lại Vue:
-
-```powershell
-Remove-Item Env:OTP_CODEX_FRONTEND -ErrorAction SilentlyContinue
-python run_local_web.py
-```
-
 Không xóa `accounts.json`, `.web_session.json` hoặc `codex_profiles/` trong quá
-trình cutover hay rollback. Hai frontend dùng chung API contract và theme key
+trình build hoặc cutover. Vue giữ nguyên API contract và theme key
 `otp-codex-theme`, nên dữ liệu tài khoản và lựa chọn theme không cần migration.
 
 ## Acceptance evidence
@@ -72,7 +57,7 @@ trình cutover hay rollback. Hai frontend dùng chung API contract và theme key
 Gate cuối ngày 24/07/2026:
 
 - Python unit/integration: 109 test pass, gồm production distribution,
-  authenticated API, fail-fast build, fingerprint theo mode và legacy rollback.
+  authenticated API, fail-fast build và production fingerprint.
 - Vue: 37 test pass; coverage 91.69% statements, 80.83% branches, 89.24%
   functions và 91.50% lines.
 - Typecheck, ESLint, production build, PowerShell parser, `pip check`,
@@ -88,9 +73,6 @@ Gate cuối ngày 24/07/2026:
 - Sau canary chỉ còn một `run_local_web.py` giữ cổng 8765. Một orphan manager
   từ 22/07 không giữ cổng cùng 7 `codex.exe` con của chính nó đã được dừng theo
   PID đã xác minh; không đụng tiến trình Python/Codex ngoài project.
-- Rollback integration phục vụ thành công `web/` khi mode `legacy`, không cần
-  Vue assets và có build fingerprint khác mode Vue.
-
 ## Production audit
 
 Trạng thái: 84/100, launchable with caveats, không có blocker cho ứng dụng

@@ -9,13 +9,9 @@ from fastapi.testclient import TestClient
 from app.build_info import (
     API_SCHEMA_VERSION,
     BUILD_INPUTS,
-    calculate_build_id,
-    frontend_asset_paths,
-    resolve_frontend_mode,
 )
 from app.local_web_app import (
     ASSETS_DIR,
-    LEGACY_ASSETS_DIR,
     STATIC_ASSETS_DIR,
     create_app,
 )
@@ -75,7 +71,6 @@ class ProductionFrontendContractTests(unittest.TestCase):
 
         self.assertEqual(ASSETS_DIR, PRODUCTION_DIST_DIR)
         self.assertEqual(STATIC_ASSETS_DIR, PRODUCTION_DIST_DIR / "assets")
-        self.assertEqual(LEGACY_ASSETS_DIR, PROJECT_ROOT / "web")
         self.assertIn("web-dist", BUILD_INPUTS)
         self.assertFalse(any(path.startswith("web/") for path in BUILD_INPUTS))
         self.assertTrue((FRONTEND_DIR / "package-lock.json").is_file())
@@ -99,43 +94,6 @@ class ProductionFrontendContractTests(unittest.TestCase):
         self.assertIn('<div id="app"></div>', response.text)
         self.assertNotIn('id="account-grid"', response.text)
         self.assertIn('src="/assets/theme-init.js"', response.text)
-
-    def test_legacy_frontend_is_an_explicit_rollback_mode(self) -> None:
-        self.assertEqual(resolve_frontend_mode(None), "vue")
-        self.assertEqual(resolve_frontend_mode("vue"), "vue")
-        self.assertEqual(resolve_frontend_mode("legacy"), "legacy")
-        self.assertEqual(
-            frontend_asset_paths("legacy"),
-            (PROJECT_ROOT / "web", None),
-        )
-        with self.assertRaisesRegex(ValueError, "OTP_CODEX_FRONTEND"):
-            resolve_frontend_mode("candidate")
-
-    def test_legacy_frontend_can_be_served_without_vue_assets(self) -> None:
-        client = TestClient(
-            create_app(
-                service=VisualBaselineService(),
-                assets_dir=LEGACY_ASSETS_DIR,
-                static_assets_dir=None,
-            ),
-            base_url="http://127.0.0.1",
-            client=("127.0.0.1", 51000),
-        )
-        self.addCleanup(client.close)
-
-        page = client.get("/")
-        legacy_script = client.get("/assets/app.js")
-
-        self.assertEqual(page.status_code, 200)
-        self.assertIn('id="account-grid"', page.text)
-        self.assertNotIn('<div id="app"></div>', page.text)
-        self.assertEqual(legacy_script.status_code, 200)
-
-    def test_frontend_mode_participates_in_build_fingerprint(self) -> None:
-        self.assertNotEqual(
-            calculate_build_id("vue"),
-            calculate_build_id("legacy"),
-        )
 
     def test_production_frontend_has_a_reproducible_build_entrypoint(
         self,

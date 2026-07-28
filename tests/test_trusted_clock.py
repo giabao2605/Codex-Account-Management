@@ -1,10 +1,13 @@
 import tempfile
 import threading
 import unittest
+from datetime import date, datetime, timezone
 from email.utils import formatdate
 from pathlib import Path
+from unittest.mock import Mock
 
 from app.local_web_service import LocalWebService
+from app.token_usage import TokenUsageCacheEntry, normalize_token_usage
 from app.trusted_clock import TrustedClock
 
 
@@ -301,6 +304,115 @@ class TrustedClockServiceTests(unittest.TestCase):
 
                 self.assertIsNone(row["otp"])
                 self.assertIsNone(row["otp_remaining_seconds"])
+            finally:
+                service.close()
+
+    def test_token_periods_use_trusted_clock_local_date(self) -> None:
+        trusted_epoch = datetime(
+            2000,
+            1,
+            2,
+            12,
+            tzinfo=timezone.utc,
+        ).timestamp()
+        trusted_date = datetime.fromtimestamp(
+            trusted_epoch,
+        ).astimezone().date()
+        fake_clock = _FakeTrustedClock(trusted_epoch)
+        snapshot = normalize_token_usage(
+            {
+                "summary": {"lifetimeTokens": 25},
+                "dailyUsageBuckets": [
+                    {
+                        "startDate": trusted_date.isoformat(),
+                        "tokens": 25,
+                    }
+                ],
+            },
+            today=trusted_date,
+        )
+        assert snapshot is not None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = LocalWebService(
+                data_file=root / "accounts.json",
+                profiles_dir=root / "profiles",
+                enable_codex=False,
+                trusted_clock=fake_clock,
+            )
+            service.start()
+            try:
+                service.import_accounts(
+                    "user@example.com|password|JBSWY3DPEHPK3PXP"
+                )
+                with service._lock:
+                    service._token_usage_cache = {
+                        "user@example.com": TokenUsageCacheEntry(
+                            snapshot=snapshot,
+                            last_attempt_monotonic=1.0,
+                            updated_at=datetime.fromtimestamp(
+                                trusted_epoch,
+                            ).astimezone(),
+                            stale=False,
+                        )
+                    }
+
+                usage = service.token_usage_statistics()
+
+                self.assertEqual(
+                    usage["periods"]["today"]["start_date"],
+                    trusted_date.isoformat(),
+                )
+                self.assertEqual(usage["aggregate"]["totals"]["today"], 25)
+            finally:
+                service.close()
+
+    def test_token_refresh_rejects_dates_after_trusted_today(self) -> None:
+        trusted_epoch = datetime(
+            2000,
+            1,
+            2,
+            12,
+            tzinfo=timezone.utc,
+        ).timestamp()
+        trusted_date = datetime.fromtimestamp(
+            trusted_epoch,
+        ).astimezone().date()
+        fake_clock = _FakeTrustedClock(trusted_epoch)
+        session = Mock()
+        session.read_token_usage.return_value = {
+            "summary": {"lifetimeTokens": 10},
+            "dailyUsageBuckets": [
+                {"startDate": trusted_date.isoformat(), "tokens": 10},
+                {"startDate": date(2020, 1, 1).isoformat(), "tokens": 99},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = LocalWebService(
+                data_file=root / "accounts.json",
+                profiles_dir=root / "profiles",
+                enable_codex=False,
+                trusted_clock=fake_clock,
+            )
+            service.start()
+            try:
+                service._refresh_token_usage(
+                    "user@example.com",
+                    session,
+                    force=True,
+                )
+                with service._lock:
+                    entry = service._token_usage_cache["user@example.com"]
+
+                assert entry.snapshot is not None
+                self.assertEqual(
+                    dict(entry.snapshot.daily_tokens),
+                    {trusted_date: 10},
+                )
+                self.assertEqual(entry.updated_at.date(), trusted_date)
             finally:
                 service.close()
 

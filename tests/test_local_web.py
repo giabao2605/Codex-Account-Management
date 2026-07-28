@@ -1,23 +1,27 @@
 import os
 import json
+import re
 import socket
 import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
-from app.build_info import API_SCHEMA_VERSION, APP_BUILD_ID
-from app.local_web_app import create_app
+from app.build_info import API_SCHEMA_VERSION, APP_BUILD_ID, BUILD_INPUTS
+from app.local_web_accounts import AccountConflictError
+from app.local_web_app import STATIC_ASSETS_DIR, create_app
 from app.local_web_profiles import (
     UnsafeProfilePathError,
     archive_profile_directory,
 )
 from app.local_web_service import LocalWebService, account_display_sort_key
 from app.otp_codex_manager_with_account_status import CodexInfo
+from app.token_usage import TokenUsageCacheEntry, normalize_token_usage
 from run_local_web import (
     existing_app_is_running,
     main as run_local_web_main,
@@ -59,31 +63,38 @@ class LocalWebApiTests(unittest.TestCase):
             "Origin": "http://127.0.0.1",
         }
 
-    def preview_and_import(
-        self,
-        lines: str,
-        *,
-        reject_on_errors: bool = False,
-    ):
-        preview = self.client.post(
-            "/api/accounts/import/preview",
-            headers=self.headers,
-            json={"lines": lines},
-        )
-        self.assertEqual(preview.status_code, 200, preview.text)
+    def add_account(self, lines: str):
         return self.client.post(
             "/api/accounts/import",
             headers=self.headers,
-            json={
-                "preview_token": preview.json()["preview_token"],
-                "reject_on_errors": reject_on_errors,
-            },
+            json={"lines": lines},
         )
+
+    def add_service_accounts(self, lines: str) -> None:
+        for line in lines.splitlines():
+            self.service.import_accounts(line)
 
     def tearDown(self) -> None:
         self.client.close()
         self.service.close()
         self.temp_dir.cleanup()
+
+    def production_asset_text(self, suffix: str) -> str:
+        self.assertIsNotNone(STATIC_ASSETS_DIR)
+        matching_paths = [
+            f"/assets/{path.name}"
+            for path in sorted(
+                STATIC_ASSETS_DIR.glob(f"*{suffix}"),
+                key=lambda item: item.name,
+            )
+        ]
+        self.assertTrue(matching_paths, suffix)
+        contents = []
+        for path in matching_paths:
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            contents.append(response.text)
+        return "\n".join(contents)
 
     def test_security_headers_and_local_health(self) -> None:
         response = self.client.get("/api/health")
@@ -121,6 +132,40 @@ class LocalWebApiTests(unittest.TestCase):
             "degraded",
         })
         self.assertIn("offset_seconds", state["time_sync"])
+
+    def test_runtime_token_module_participates_in_build_id(self) -> None:
+        self.assertIn("app/token_usage.py", BUILD_INPUTS)
+
+    def test_liquid_glass_phase1_parity_document_covers_baseline(
+        self,
+    ) -> None:
+        baseline_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs"
+            / "liquid-glass-phase1-baseline-parity.md"
+        )
+
+        content = baseline_path.read_text(encoding="utf-8")
+
+        for expected in (
+            "API_SCHEMA_VERSION = 5",
+            "TokenUsageResponse.schema_version = 2",
+            "/api/usage/tokens",
+            "Authorization: Bearer <session token>",
+            "X-CSRF-Token",
+            "sessionStorage",
+            "daily_buckets: []",
+            "daily_buckets: null",
+            "otp-codex-theme",
+            "tests/visual_baseline_app.py",
+            "python -B -m unittest discover -s tests -v",
+            "python -B -m unittest tests.test_visual_baseline -v",
+            "node --check web\\app.js",
+            "node --check web\\theme-init.js",
+        ):
+            self.assertIn(expected, content)
+
+        self.assertNotRegex(content, r"Bearer\s+[A-Za-z0-9_-]{16,}")
 
     def test_account_display_order_prioritizes_attention_then_quota(
         self,
@@ -183,229 +228,113 @@ class LocalWebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("OTP Codex Local", response.text)
-        self.assertIn('href="/assets/styles.css"', response.text)
-        self.assertIn('src="/assets/app.js"', response.text)
-        self.assertNotIn("<script>", response.text)
-        self.assertIn('id="open-import"', response.text)
-        self.assertIn('id="account-dialog"', response.text)
-        self.assertIn('id="account-filter"', response.text)
-        self.assertIn('value="usable"', response.text)
-        self.assertIn('value="attention"', response.text)
-        self.assertIn('value="quota-available"', response.text)
-        self.assertIn('value="quota-low"', response.text)
-        self.assertIn('value="quota-empty"', response.text)
-        self.assertIn('value="quota-unknown"', response.text)
-        self.assertNotIn('id="account-search"', response.text)
-        self.assertNotIn('id="attention-filter"', response.text)
-
-        script = self.client.get("/assets/app.js")
-        self.assertEqual(script.status_code, 200)
-        self.assertIn("window.sessionStorage", script.text)
+        self.assertIn('<div id="app"></div>', response.text)
+        self.assertNotRegex(response.text, r"https?://")
+        self.assertNotRegex(
+            response.text,
+            r"<script(?![^>]*\bsrc=)[^>]*>",
+        )
+        asset_paths = re.findall(
+            r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"',
+            response.text,
+        )
+        self.assertGreaterEqual(len(asset_paths), 3)
+        for asset_path in asset_paths:
+            asset_response = self.client.get(asset_path)
+            self.assertEqual(asset_response.status_code, 200, asset_path)
+        script = self.production_asset_text(".js")
+        self.assertIn("otp-codex-access-token", script)
 
     def test_frontend_supports_persistent_light_and_dark_themes(self) -> None:
         page = self.client.get("/").text
         init_script = self.client.get("/assets/theme-init.js")
-        app_script = self.client.get("/assets/app.js").text
-        styles = self.client.get("/assets/styles.css").text
+        app_script = self.production_asset_text(".js")
+        styles = self.production_asset_text(".css")
 
         self.assertEqual(init_script.status_code, 200)
         self.assertIn('content="light dark"', page)
         self.assertIn('src="/assets/theme-init.js"', page)
-        self.assertIn('id="theme-toggle"', page)
-        self.assertIn('aria-pressed="true"', page)
         self.assertIn('id="theme-color"', page)
         self.assertIn('otp-codex-theme', init_script.text)
         self.assertIn('window.localStorage', init_script.text)
         self.assertIn('prefers-color-scheme: light', init_script.text)
-        self.assertIn('themeToggle: document.querySelector("#theme-toggle")', app_script)
-        self.assertIn('ui.themeToggle.addEventListener("click"', app_script)
-        self.assertIn('window.localStorage.setItem(themeStorageKey', app_script)
-        self.assertIn(':root[data-theme="light"]', styles)
-        self.assertIn('--canvas: #e8edf5;', styles)
-        self.assertIn('--surface: #f1f4f8;', styles)
-        self.assertIn('--panel-background: rgba(242, 245, 249, 0.94);', styles)
-        self.assertIn('.theme-toggle {', styles)
-        self.assertIn('class="header-utilities"', page)
-        self.assertIn('.header-utilities {', styles)
-
-        header_utilities = page[
-            page.index('<div class="header-utilities"') :
-            page.index('</div>', page.index('<div class="header-utilities"'))
-        ]
-        self.assertIn('id="theme-toggle"', header_utilities)
-        self.assertIn('id="shutdown-application"', header_utilities)
+        self.assertIn('otp-codex-theme', app_script)
+        self.assertIn('otp-codex-effects', app_script)
+        self.assertIn('[data-theme=light]', styles)
+        self.assertIn('--canvas:#dfe4eb', styles)
+        self.assertIn('? "#dfe4eb"', init_script.text)
+        self.assertIn("Giao diện", app_script)
         self.assertLess(
-            header_utilities.index('id="theme-toggle"'),
-            header_utilities.index('id="shutdown-application"'),
+            page.index('src="/assets/theme-init.js"'),
+            page.index('type="module"'),
         )
 
     def test_frontend_prioritizes_primary_actions_and_accessible_feedback(
         self,
     ) -> None:
-        page = self.client.get("/").text
-        script = self.client.get("/assets/app.js").text
-        styles = self.client.get("/assets/styles.css").text
+        script = self.production_asset_text(".js")
+        styles = self.production_asset_text(".css")
 
-        self.assertIn('id="refresh-interval">—', page)
-        self.assertIn('id="time-sync-status"', page)
-        self.assertNotIn("TRÌNH QUẢN LÝ CỤC BỘ", page)
-        self.assertIn('id="last-updated"', page)
-        self.assertNotIn('id="last-updated" aria-live="polite"', page)
-        self.assertEqual(page.count('class="summary-card"'), 4)
-        self.assertIn('id="sync-success-ratio"', page)
-        self.assertIn('class="sync-breakdown"', page)
-        self.assertIn('id="sync-success-count"', page)
-        self.assertIn('id="sync-login-count"', page)
-        self.assertIn('id="sync-unlinked-count"', page)
-        self.assertIn('id="sync-error-count"', page)
-        self.assertNotIn('class="sync-banner"', page)
-        self.assertIn('id="visible-account-count"', page)
-        self.assertIn("option-toggle", script)
-        self.assertIn('account.otp || "OTP chưa sẵn sàng"', script)
-        self.assertIn('? "Bấm để sao chép OTP"', script)
-        self.assertIn('OTP tạm khóa', script)
-        self.assertIn('setAttribute("aria-expanded"', script)
-        self.assertNotIn('"account-more"', script)
-        self.assertIn(".option-actions[hidden]", styles)
-        self.assertIn("grid-column: 3", styles)
-        self.assertIn("cursor: copy", styles)
-        self.assertIn("appearance: none", styles)
-        self.assertIn("background-position:", styles)
-        self.assertIn("Sao chép mật khẩu", script)
-        self.assertIn("Sao chép secret", script)
-        self.assertIn('element("progress"', script)
-        self.assertIn('ui.toast.setAttribute("role", "alert")', script)
-        self.assertIn("otp: _otp", script)
-        self.assertIn("openAccountIds", script)
-        self.assertIn("min-width: 0", styles)
-        self.assertIn("overflow-wrap: anywhere", styles)
-        self.assertNotIn("innerHTML", script)
-        self.assertIn('ui.accountFilter.addEventListener("change"', script)
-        self.assertNotIn("attentionOnly", script)
-        self.assertIn('filter === "usable"', script)
-        self.assertIn('quotaKnown && quota > 0', script)
-        self.assertIn('filter === "attention"', script)
-        self.assertIn('filter === "quota-available"', script)
-        self.assertIn('filter === "quota-low"', script)
-        self.assertIn('filter === "quota-empty"', script)
-        self.assertIn('filter === "quota-unknown"', script)
-        self.assertIn("function syncMetrics", script)
-        self.assertIn("function formatRefreshInterval", script)
-        self.assertIn("function renderTimeSyncStatus", script)
-        self.assertIn("Chưa lấy được giờ chuẩn · OTP có thể lệch", script)
-        self.assertIn("OTP chưa sẵn sàng", script)
-        self.assertIn("summaryTotal === state.accounts.length", script)
-        self.assertIn('classList.toggle("is-active"', script)
-        self.assertIn("grid-template-columns: repeat(4", styles)
-        self.assertIn(".sync-breakdown", styles)
-        self.assertNotIn(".connection::before", styles)
+        for expected in (
+            "Làm mới tất cả",
+            "Thêm tài khoản",
+            "Cần chú ý",
+            "Quota thấp",
+            "Chưa rõ quota",
+            "Mật khẩu",
+            "Secret",
+            "Không có tài khoản phù hợp.",
+            "Không thể kết nối ứng dụng local.",
+        ):
+            self.assertIn(expected, script)
+        self.assertIn(".account-actions", styles)
+        self.assertIn("overflow-wrap:anywhere", styles)
 
-        create_card = script[
-            script.index("function createAccountCard") :
-            script.index("function applyAccountFilters")
-        ]
-        primary_actions = create_card[
-            create_card.index('const actions = element("div", "card-actions")') :
-            create_card.index("const optionToggle")
-        ]
-        option_actions = create_card[
-            create_card.index('const optionActions = element("div", "option-actions")') :
-            create_card.index("const deleteButton")
-        ]
-        self.assertIn('"Sao chép email", "copy-email"', primary_actions)
-        self.assertIn('"Sao chép mật khẩu", "copy-sensitive"', primary_actions)
-        self.assertNotIn('"Sao chép OTP", "copy-otp"', primary_actions)
-        self.assertNotIn('"Đồng bộ", "refresh"', primary_actions)
-        self.assertIn('"Sao chép OTP", "copy-otp"', option_actions)
-        self.assertIn('"Đồng bộ", "refresh"', option_actions)
-        self.assertIn('ariaLabel: `Sao chép secret của ${account.email}`', option_actions)
-        self.assertIn('ariaLabel: `Liên kết Codex cho ${account.email}`', option_actions)
-        self.assertIn('ariaLabel: `Xóa tài khoản ${account.email}`', create_card)
-        self.assertNotIn('"Sao chép email", "copy-email"', option_actions)
-        self.assertNotIn('"Sao chép mật khẩu", "copy-sensitive"', option_actions)
-
-        render_state = script[script.index("function renderState") :]
-        self.assertLess(
-            render_state.index("applyAccountFilters();"),
-            render_state.index("restoreCardInteraction(cardInteraction);"),
-        )
-
-    def test_frontend_exposes_preview_profile_and_shutdown_without_overview_cards(
+    def test_frontend_exposes_single_add_profile_shutdown_and_overview(
         self,
     ) -> None:
-        page = self.client.get("/").text
-        script = self.client.get("/assets/app.js").text
+        script = self.production_asset_text(".js")
 
-        self.assertIn('id="preview-import"', page)
-        self.assertIn('id="reject-on-errors"', page)
-        self.assertNotIn('id="recommended-account"', page)
-        self.assertNotIn('id="orphan-profile-count"', page)
-        self.assertNotIn('id="archive-orphan-profiles"', page)
-        self.assertNotIn("Tài khoản đề xuất", page)
-        self.assertNotIn("Profile không còn dùng", page)
-        self.assertIn('id="shutdown-application"', page)
-        self.assertIn('"unlink"', script)
-        self.assertIn('"reset-profile"', script)
-        self.assertIn("/api/accounts/import/preview", script)
-        self.assertIn("preview_token", script)
-        self.assertIn("reject_on_errors", script)
-        self.assertIn("/unlink", script)
-        self.assertIn("/reset-profile", script)
-        self.assertNotIn("/api/profiles/orphans/archive", script)
+        self.assertIn("Thêm tài khoản", script)
+        self.assertIn("Ngắt liên kết", script)
+        self.assertIn("Đặt lại profile", script)
+        self.assertIn("Tổng tài khoản", script)
+        self.assertIn("thành công", script)
+        self.assertIn("/api/accounts/import/check", script)
+        self.assertIn("/api/accounts/import", script)
+        self.assertIn("/api/codex/", script)
+        self.assertIn("/api/profiles/orphans/archive", script)
         self.assertIn("/api/application/shutdown", script)
-        self.assertIn("previewRequestId", script)
-        self.assertIn("requestedLines", script)
-        self.assertIn("ui.accountLines.value.trim() !== requestedLines", script)
-        shutdown_function = script[
-            script.index("async function shutdownApplication()") :
-            script.index("async function refreshAllAccounts()")
-        ]
-        self.assertLess(
-            shutdown_function.index("applicationStopping = true"),
-            shutdown_function.index('await api("/api/application/shutdown"'),
-        )
-        self.assertIn("if (!error.status)", shutdown_function)
-        self.assertGreaterEqual(script.count("window.confirm("), 4)
+        self.assertGreaterEqual(script.count("confirm("), 2)
 
     def test_frontend_exposes_accessible_usage_statistics_tab(self) -> None:
-        page = self.client.get("/").text
-        script = self.client.get("/assets/app.js").text
-        styles = self.client.get("/assets/styles.css").text
+        script = self.production_asset_text(".js")
+        styles = self.production_asset_text(".css")
 
-        self.assertIn('role="tablist"', page)
-        self.assertIn('id="accounts-tab"', page)
-        self.assertIn('id="usage-tab"', page)
-        self.assertIn('aria-controls="accounts-panel"', page)
-        self.assertIn('aria-controls="usage-panel"', page)
-        self.assertIn('id="usage-panel"', page)
-        self.assertIn('id="usage-account-rows"', page)
-        self.assertIn('id="usage-average-used"', page)
-        self.assertIn('id="usage-average-remaining"', page)
-        self.assertIn('id="usage-known-count"', page)
-        self.assertIn('id="usage-stale-count"', page)
-        self.assertIn('id="usage-attention-count"', page)
-        self.assertIn("function activateTab", script)
-        self.assertIn("function renderUsageStatistics", script)
-        self.assertIn('event.key === "ArrowRight"', script)
-        self.assertIn('event.key === "ArrowLeft"', script)
-        self.assertIn("usage_statistics", script)
-        self.assertIn("expectedApiSchemaVersion", script)
-        self.assertIn("Dịch vụ nền đang dùng phiên bản cũ", script)
-        self.assertIn("backendCompatible", script)
+        for expected in (
+            "Tài khoản",
+            "Sử dụng",
+            "Tất cả",
+            "Ngày",
+            "Tuần",
+            "Tích lũy",
+            "Token theo ngày",
+            "12 tháng gần nhất",
+        ):
+            self.assertIn(expected, script)
+        self.assertIn("force_token_usage", script)
         self.assertIn(".workspace-tabs", styles)
-        self.assertIn(".usage-table", styles)
+        self.assertIn(".heatmap", styles)
+        self.assertIn(".heat-cell", styles)
 
-    def test_frontend_keeps_profile_actions_without_overview_cards(
+    def test_frontend_keeps_profile_actions_with_overview_cards(
         self,
     ) -> None:
-        page = self.client.get("/").text
-        script = self.client.get("/assets/app.js").text
+        script = self.production_asset_text(".js")
 
-        self.assertNotIn("Tài khoản khỏe, còn quota cao nhất", page)
-        self.assertNotIn("Profile không còn dùng", page)
-        self.assertNotIn("Thư mục đăng nhập cũ", page)
-        self.assertIn("Giữ tài khoản trong danh sách", script)
-        self.assertIn("tạo profile trống", script)
+        self.assertIn("Ngắt liên kết", script)
+        self.assertIn("Đặt lại profile", script)
+        self.assertIn("profile mồ côi", script)
 
     def test_rejects_non_loopback_client(self) -> None:
         remote_client = TestClient(
@@ -438,6 +367,145 @@ class LocalWebApiTests(unittest.TestCase):
             )
         finally:
             unauthenticated_client.close()
+
+    def test_token_usage_endpoint_requires_auth_and_returns_safe_data(
+        self,
+    ) -> None:
+        self.service.import_accounts(
+            "usage@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        snapshot = normalize_token_usage(
+            {
+                "summary": {
+                    "lifetimeTokens": 1_000,
+                    "peakDailyTokens": 400,
+                    "longestRunningTurnSec": 90,
+                    "currentStreakDays": 2,
+                    "longestStreakDays": 5,
+                },
+                "dailyUsageBuckets": [
+                    {"startDate": date.today().isoformat(), "tokens": 25},
+                ],
+            },
+            today=date.today(),
+        )
+        assert snapshot is not None
+        with self.service._lock:
+            self.service._token_usage_cache = {
+                "usage@example.com": TokenUsageCacheEntry(
+                    snapshot=snapshot,
+                    last_attempt_monotonic=10.0,
+                    updated_at=datetime.now(timezone.utc),
+                    stale=False,
+                )
+            }
+
+        response = self.client.get("/api/usage/tokens")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["coverage"]["fresh_accounts"], 1)
+        self.assertEqual(payload["aggregate"]["totals"]["today"], 25)
+        self.assertEqual(payload["accounts"][0]["email"], "usage@example.com")
+        self.assertEqual(payload["accounts"][0]["longest_running_turn_seconds"], 90)
+        self.assertEqual(payload["accounts"][0]["current_streak_days"], 2)
+        self.assertEqual(payload["accounts"][0]["longest_streak_days"], 5)
+        self.assertEqual(
+            payload["accounts"][0]["daily_buckets"],
+            [{"start_date": date.today().isoformat(), "tokens": 25}],
+        )
+        self.assertEqual(len(payload["aggregate"]["series"]["daily"]), 30)
+        serialized = json.dumps(payload).casefold()
+        for sensitive_name in (
+            "password",
+            "secret",
+            "access_token",
+            "csrf",
+            "auth.json",
+            "profile_dir",
+            "otp",
+        ):
+            self.assertNotIn(sensitive_name, serialized)
+
+        unauthenticated_client = TestClient(
+            create_app(self.service),
+            base_url="http://127.0.0.1",
+            client=("127.0.0.1", 51004),
+        )
+        try:
+            self.assertEqual(
+                unauthenticated_client.get("/api/usage/tokens").status_code,
+                401,
+            )
+        finally:
+            unauthenticated_client.close()
+
+        state = self.client.get("/api/state").json()
+        self.assertNotIn("dailyUsageBuckets", json.dumps(state))
+        self.assertNotIn("token_activity", state)
+
+    def test_manual_refresh_can_force_token_usage_refresh(self) -> None:
+        with patch.object(
+            self.service,
+            "refresh_async",
+            return_value=True,
+        ) as refresh_async:
+            response = self.client.post(
+                "/api/codex/refresh",
+                headers=self.headers,
+                json={
+                    "account_id": None,
+                    "force_token_usage": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["accepted"])
+        refresh_async.assert_called_once_with(
+            None,
+            force_token_usage=True,
+        )
+
+    def test_account_refresh_can_force_token_usage_refresh(self) -> None:
+        account_id = "a" * 16
+        with patch.object(
+            self.service,
+            "refresh_async",
+            return_value=True,
+        ) as refresh_async:
+            response = self.client.post(
+                "/api/codex/refresh",
+                headers=self.headers,
+                json={
+                    "account_id": account_id,
+                    "force_token_usage": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        refresh_async.assert_called_once_with(
+            {account_id},
+            force_token_usage=True,
+        )
+
+    def test_refresh_async_forwards_force_token_usage_to_worker(self) -> None:
+        self.service.import_accounts(
+            "worker@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        self.service.enable_codex = True
+
+        with patch("app.local_web_service.threading.Thread") as thread_type:
+            accepted = self.service.refresh_async(
+                force_token_usage=True,
+            )
+
+        self.assertTrue(accepted)
+        _, kwargs = thread_type.call_args
+        self.assertEqual(kwargs["args"][1], True)
+        self.assertEqual(len(kwargs["args"][0]), 1)
+        thread_type.return_value.start.assert_called_once_with()
+        self.service._sync_lock.release()
 
     def test_lifecycle_mutations_require_authentication_and_csrf(self) -> None:
         account_id = "0" * 16
@@ -628,7 +696,7 @@ class LocalWebApiTests(unittest.TestCase):
         )
 
     def test_state_recommends_valid_account_with_highest_quota(self) -> None:
-        self.service.import_accounts(
+        self.add_service_accounts(
             "high@example.com|password|JBSWY3DPEHPK3PXP\n"
             "low@example.com|password|JBSWY3DPEHPK3PXQ\n"
             "attention@example.com|password|JBSWY3DPEHPK3PXR"
@@ -669,7 +737,7 @@ class LocalWebApiTests(unittest.TestCase):
     def test_recommendation_uses_earlier_reset_as_quota_tie_breaker(
         self,
     ) -> None:
-        self.service.import_accounts(
+        self.add_service_accounts(
             "later@example.com|password|JBSWY3DPEHPK3PXP\n"
             "sooner@example.com|password|JBSWY3DPEHPK3PXQ"
         )
@@ -691,9 +759,16 @@ class LocalWebApiTests(unittest.TestCase):
                 ),
             }
 
-        recommendation = self.client.get("/api/state").json()[
-            "recommendation"
-        ]
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = cls(2026, 7, 22, 12, 0)
+                return value if tz is None else value.replace(tzinfo=tz)
+
+        with patch("app.local_web_service.datetime", FixedDateTime):
+            recommendation = self.client.get("/api/state").json()[
+                "recommendation"
+            ]
 
         self.assertEqual(recommendation["email"], "sooner@example.com")
         self.assertEqual(recommendation["quota_reset_at"], "23/07 10:00")
@@ -701,7 +776,7 @@ class LocalWebApiTests(unittest.TestCase):
     def test_state_reports_usage_statistics_per_account_and_totals(
         self,
     ) -> None:
-        self.service.import_accounts(
+        self.add_service_accounts(
             "healthy@example.com|password|JBSWY3DPEHPK3PXP\n"
             "low@example.com|password|JBSWY3DPEHPK3PXQ\n"
             "empty@example.com|password|JBSWY3DPEHPK3PXR\n"
@@ -843,6 +918,149 @@ class LocalWebApiTests(unittest.TestCase):
             [0.0, 100.0],
         )
 
+    def test_token_usage_cache_ttl_force_refresh_and_stale_fallback(
+        self,
+    ) -> None:
+        session = Mock()
+        session.read_token_usage.return_value = {
+            "summary": {
+                "lifetimeTokens": 500,
+                "peakDailyTokens": 100,
+            },
+            "dailyUsageBuckets": [
+                {"startDate": date.today().isoformat(), "tokens": 40},
+            ],
+        }
+
+        with patch("app.local_web_service.time.monotonic", return_value=100.0):
+            self.service._refresh_token_usage(
+                "usage@example.com",
+                session,
+                force=False,
+            )
+        session.read_token_usage.assert_called_once_with()
+
+        with patch("app.local_web_service.time.monotonic", return_value=200.0):
+            self.service._refresh_token_usage(
+                "usage@example.com",
+                session,
+                force=False,
+            )
+        session.read_token_usage.assert_called_once_with()
+
+        session.read_token_usage.side_effect = RuntimeError("temporary")
+        with patch("app.local_web_service.time.monotonic", return_value=210.0):
+            self.service._refresh_token_usage(
+                "usage@example.com",
+                session,
+                force=True,
+            )
+
+        self.assertEqual(session.read_token_usage.call_count, 2)
+        with self.service._lock:
+            cached = self.service._token_usage_cache["usage@example.com"]
+        self.assertTrue(cached.stale)
+        self.assertIsNotNone(cached.snapshot)
+        assert cached.snapshot is not None
+        self.assertEqual(dict(cached.snapshot.daily_tokens)[date.today()], 40)
+
+    def test_token_usage_failure_does_not_discard_other_account_or_quota(
+        self,
+    ) -> None:
+        self.add_service_accounts(
+            "fresh@example.com|password|JBSWY3DPEHPK3PXP\n"
+            "failed@example.com|password|JBSWY3DPEHPK3PXQ"
+        )
+        sessions = {}
+        for account in self.service._accounts:
+            profile_dir = self.service.profile_directory(account.email)
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "auth.json").touch()
+            session = Mock()
+            session.query.return_value = {
+                "account": {
+                    "account": {
+                        "email": account.email,
+                        "planType": "plus",
+                    }
+                },
+                "limits": {
+                    "rateLimits": {
+                        "primary": {
+                            "usedPercent": 25,
+                            "windowDurationMins": 10_080,
+                            "resetsAt": 1_893_456_000,
+                        }
+                    }
+                },
+            }
+            sessions[account.email.casefold()] = session
+
+        sessions["fresh@example.com"].read_token_usage.return_value = {
+            "summary": {
+                "lifetimeTokens": 500,
+                "peakDailyTokens": 50,
+            },
+            "dailyUsageBuckets": [
+                {"startDate": date.today().isoformat(), "tokens": 25}
+            ],
+        }
+        sessions["failed@example.com"].read_token_usage.side_effect = (
+            RuntimeError("temporary token failure")
+        )
+
+        with patch.object(
+            self.service,
+            "_get_session",
+            side_effect=lambda key, _profile_dir: sessions[key],
+        ):
+            results = [
+                self.service._refresh_account_locked(account)
+                for account in self.service._accounts
+            ]
+
+        self.assertEqual(results, ["success", "success"])
+        with self.service._lock:
+            self.assertEqual(
+                self.service._codex_info["fresh@example.com"].remaining_percent,
+                "75%",
+            )
+            self.assertEqual(
+                self.service._codex_info["failed@example.com"].remaining_percent,
+                "75%",
+            )
+            self.assertIsNotNone(
+                self.service._token_usage_cache["fresh@example.com"].snapshot
+            )
+            self.assertIsNone(
+                self.service._token_usage_cache["failed@example.com"].snapshot
+            )
+
+    def test_deleting_account_clears_token_usage_cache(self) -> None:
+        self.service.import_accounts(
+            "delete-usage@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        key = "delete-usage@example.com"
+        snapshot = normalize_token_usage(
+            {"summary": {}, "dailyUsageBuckets": []},
+            today=date.today(),
+        )
+        assert snapshot is not None
+        with self.service._lock:
+            self.service._token_usage_cache = {
+                key: TokenUsageCacheEntry(
+                    snapshot=snapshot,
+                    last_attempt_monotonic=10.0,
+                    updated_at=datetime.now(timezone.utc),
+                    stale=False,
+                )
+            }
+
+        self.service.delete_account(self.service.account_id(key))
+
+        with self.service._lock:
+            self.assertNotIn(key, self.service._token_usage_cache)
+
     def test_archive_revalidates_destination_before_protecting_it(self) -> None:
         profiles_dir = Path(self.temp_dir.name) / "safe-profiles"
         profiles_dir.mkdir()
@@ -884,149 +1102,134 @@ class LocalWebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_import_preview_is_read_only_and_redacts_credentials(self) -> None:
-        lines = (
-            "user@example.com|super-private-password|"
-            "JBSWY3DPEHPK3PXP\n"
-            "invalid-line"
+    def test_single_account_is_checked_inline_and_added_without_preview(
+        self,
+    ) -> None:
+        lines = "user@example.com|password|JBSWY3DPEHPK3PXP"
+
+        check = self.client.post(
+            "/api/accounts/import/check",
+            headers=self.headers,
+            json={"lines": lines},
+        )
+        add = self.client.post(
+            "/api/accounts/import",
+            headers=self.headers,
+            json={"lines": lines},
         )
 
-        response = self.client.post(
+        self.assertEqual(check.status_code, 200, check.text)
+        self.assertEqual(
+            check.json(),
+            {
+                "valid": True,
+                "conflict": None,
+                "message": "Tài khoản có thể được thêm.",
+            },
+        )
+        self.assertEqual(add.status_code, 200, add.text)
+        self.assertEqual(
+            add.json(),
+            {"total": 1, "email": "user@example.com"},
+        )
+        self.assertEqual(
+            self.service.state()["accounts"][0]["email"],
+            "user@example.com",
+        )
+
+    def test_single_account_rejects_duplicate_email_and_secret(self) -> None:
+        first = "user@example.com|password|JBSWY3DPEHPK3PXP"
+        self.assertEqual(
+            self.client.post(
+                "/api/accounts/import",
+                headers=self.headers,
+                json={"lines": first},
+            ).status_code,
+            200,
+        )
+
+        duplicate_email = (
+            "user@example.com|new-password|JBSWY3DPEHPK3PXQ"
+        )
+        duplicate_secret = (
+            "other@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        email_check = self.client.post(
+            "/api/accounts/import/check",
+            headers=self.headers,
+            json={"lines": duplicate_email},
+        )
+        secret_check = self.client.post(
+            "/api/accounts/import/check",
+            headers=self.headers,
+            json={"lines": duplicate_secret},
+        )
+        email_add = self.client.post(
+            "/api/accounts/import",
+            headers=self.headers,
+            json={"lines": duplicate_email},
+        )
+        secret_add = self.client.post(
+            "/api/accounts/import",
+            headers=self.headers,
+            json={"lines": duplicate_secret},
+        )
+
+        self.assertEqual(email_check.status_code, 200, email_check.text)
+        self.assertEqual(email_check.json()["conflict"], "email")
+        self.assertEqual(secret_check.status_code, 200, secret_check.text)
+        self.assertEqual(secret_check.json()["conflict"], "secret")
+        self.assertEqual(email_add.status_code, 409)
+        self.assertEqual(secret_add.status_code, 409)
+        self.assertEqual(len(self.service.state()["accounts"]), 1)
+        account_id = self.service.state()["accounts"][0]["id"]
+        password = self.client.post(
+            f"/api/accounts/{account_id}/sensitive",
+            headers=self.headers,
+            json={"field": "password"},
+        )
+        self.assertEqual(password.json()["value"], "password")
+
+    def test_single_account_rejects_multiple_lines_and_removes_preview(
+        self,
+    ) -> None:
+        lines = (
+            "one@example.com|password|JBSWY3DPEHPK3PXP\n"
+            "two@example.com|password|JBSWY3DPEHPK3PXQ"
+        )
+
+        check = self.client.post(
+            "/api/accounts/import/check",
+            headers=self.headers,
+            json={"lines": lines},
+        )
+        add = self.client.post(
+            "/api/accounts/import",
+            headers=self.headers,
+            json={"lines": lines},
+        )
+        preview = self.client.post(
             "/api/accounts/import/preview",
             headers=self.headers,
             json={"lines": lines},
         )
 
-        self.assertEqual(response.status_code, 200, response.text)
-        payload = response.json()
-        self.assertIsInstance(payload["preview_token"], str)
-        self.assertGreaterEqual(len(payload["preview_token"]), 32)
-        self.assertEqual(payload["counts"]["added"], 1)
-        self.assertEqual(payload["counts"]["updated"], 0)
-        self.assertEqual(payload["counts"]["duplicates"], 0)
-        self.assertEqual(payload["counts"]["errors"], 1)
-        self.assertEqual(
-            payload["changes"],
-            [{"email": "user@example.com", "action": "add"}],
-        )
-        serialized_changes = str(payload["changes"]).casefold()
-        self.assertNotIn("super-private-password", serialized_changes)
-        self.assertNotIn("jbswy3dpehpk3pxp", serialized_changes)
+        self.assertEqual(check.status_code, 200, check.text)
+        self.assertFalse(check.json()["valid"])
+        self.assertEqual(check.json()["conflict"], "invalid")
+        self.assertEqual(add.status_code, 400)
+        self.assertEqual(preview.status_code, 404)
         self.assertEqual(self.service.state()["accounts"], [])
-        self.assertFalse(self.service.data_file.exists())
-
-    def test_import_requires_preview_token_and_rejects_tampering(self) -> None:
-        missing_token = self.client.post(
-            "/api/accounts/import",
-            headers=self.headers,
-            json={"reject_on_errors": False},
-        )
-        preview = self.client.post(
-            "/api/accounts/import/preview",
-            headers=self.headers,
-            json={
-                "lines": (
-                    "user@example.com|password|"
-                    "JBSWY3DPEHPK3PXP"
-                )
-            },
-        )
-        token = preview.json()["preview_token"]
-        tampered = self.client.post(
-            "/api/accounts/import",
-            headers=self.headers,
-            json={
-                "preview_token": f"{token[:-1]}x",
-                "reject_on_errors": False,
-            },
-        )
-
-        self.assertEqual(missing_token.status_code, 422)
-        self.assertGreaterEqual(tampered.status_code, 400)
-        self.assertLess(tampered.status_code, 500)
-        self.assertEqual(self.service.state()["accounts"], [])
-
-    def test_import_rejects_stale_preview_token(self) -> None:
-        preview = self.client.post(
-            "/api/accounts/import/preview",
-            headers=self.headers,
-            json={
-                "lines": (
-                    "previewed@example.com|password|"
-                    "JBSWY3DPEHPK3PXP"
-                )
-            },
-        )
-        self.assertEqual(preview.status_code, 200, preview.text)
-        self.service.import_accounts(
-            "concurrent@example.com|password|JBSWY3DPEHPK3PXQ"
-        )
-
-        response = self.client.post(
-            "/api/accounts/import",
-            headers=self.headers,
-            json={
-                "preview_token": preview.json()["preview_token"],
-                "reject_on_errors": False,
-            },
-        )
-
-        self.assertEqual(response.status_code, 409)
-        emails = {
-            account["email"]
-            for account in self.service.state()["accounts"]
-        }
-        self.assertEqual(emails, {"concurrent@example.com"})
-
-    def test_import_reject_on_errors_is_all_or_nothing(self) -> None:
-        preview = self.client.post(
-            "/api/accounts/import/preview",
-            headers=self.headers,
-            json={
-                "lines": (
-                    "valid@example.com|password|"
-                    "JBSWY3DPEHPK3PXP\n"
-                    "invalid-line"
-                )
-            },
-        )
-        self.assertEqual(preview.status_code, 200, preview.text)
-        self.assertEqual(preview.json()["counts"]["errors"], 1)
-
-        response = self.client.post(
-            "/api/accounts/import",
-            headers=self.headers,
-            json={
-                "preview_token": preview.json()["preview_token"],
-                "reject_on_errors": True,
-            },
-        )
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(self.service.state()["accounts"], [])
-        self.assertFalse(self.service.data_file.exists())
-
-    def test_import_can_accept_valid_rows_from_preview_with_errors(self) -> None:
-        response = self.preview_and_import(
-            "valid@example.com|password|JBSWY3DPEHPK3PXP\n"
-            "invalid-line",
-            reject_on_errors=False,
-        )
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["added"], 1)
-        self.assertEqual(len(response.json()["errors"]), 1)
-        self.assertEqual(
-            self.service.state()["accounts"][0]["email"],
-            "valid@example.com",
-        )
 
     def test_import_state_and_sensitive_values_are_separated(self) -> None:
-        response = self.preview_and_import(
+        response = self.add_account(
             "user@example.com|password|JBSWY3DPEHPK3PXP",
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["added"], 1)
+        self.assertEqual(
+            response.json(),
+            {"total": 1, "email": "user@example.com"},
+        )
 
         state_response = self.client.get("/api/state")
         state = state_response.json()
@@ -1059,28 +1262,8 @@ class LocalWebApiTests(unittest.TestCase):
             "password",
         )
 
-    def test_import_reports_duplicates_updates_and_conflicts(self) -> None:
-        first = self.preview_and_import(
-            "user@example.com|password|JBSWY3DPEHPK3PXP",
-        )
-        duplicate = self.preview_and_import(
-            "user@example.com|password|JBSWY3DPEHPK3PXP",
-        )
-        update = self.preview_and_import(
-            "user@example.com|new-password|JBSWY3DPEHPK3PXQ",
-        )
-        conflict = self.preview_and_import(
-            "other@example.com|password|JBSWY3DPEHPK3PXQ\n"
-            "invalid-line",
-        )
-
-        self.assertEqual(first.json()["added"], 1)
-        self.assertEqual(duplicate.json()["duplicates"], 1)
-        self.assertEqual(update.json()["updated"], 1)
-        self.assertEqual(len(conflict.json()["errors"]), 2)
-
     def test_invalid_sensitive_field_does_not_echo_input(self) -> None:
-        import_response = self.preview_and_import(
+        import_response = self.add_account(
             "user@example.com|password|JBSWY3DPEHPK3PXP",
         )
         self.assertEqual(import_response.status_code, 200)
@@ -1098,7 +1281,7 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertNotIn("secret-and-token-value", response.text)
 
     def test_delete_account_requires_csrf_and_removes_it(self) -> None:
-        self.preview_and_import(
+        self.add_account(
             "user@example.com|password|JBSWY3DPEHPK3PXP",
         )
         account_id = self.client.get(
@@ -1167,6 +1350,24 @@ class LocalWebApiTests(unittest.TestCase):
                 future.result()
 
         self.assertEqual(len(self.service.state()["accounts"]), 8)
+
+    def test_concurrent_duplicate_adds_create_one_account(self) -> None:
+        barrier = threading.Barrier(8)
+        line = "same@example.com|password|JBSWY3DPEHPK3PXP"
+
+        def add_same_account() -> bool:
+            barrier.wait()
+            try:
+                self.service.import_accounts(line)
+            except AccountConflictError:
+                return False
+            return True
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(lambda _: add_same_account(), range(8)))
+
+        self.assertEqual(results.count(True), 1)
+        self.assertEqual(len(self.service.state()["accounts"]), 1)
 
     def test_missing_codex_command_does_not_leave_waiting_status(self) -> None:
         enabled_service = LocalWebService(

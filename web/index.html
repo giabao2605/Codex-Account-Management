@@ -13,6 +13,10 @@
 <body>
   <main class="shell">
     <header class="topbar">
+      <div class="brand-block">
+        <h1>Tài khoản Codex</h1>
+        <p class="subtitle">Lấy OTP, theo dõi quota và đồng bộ tài khoản tại một nơi.</p>
+      </div>
       <div class="header-utilities">
         <button class="theme-toggle" id="theme-toggle" type="button"
                 aria-label="Chuyển sang giao diện sáng" aria-pressed="true"
@@ -20,92 +24,81 @@
           <span class="theme-toggle-icon" aria-hidden="true"></span>
           <span class="visually-hidden" id="theme-toggle-text">Giao diện tối</span>
         </button>
-        <button class="button button-danger" id="shutdown-application" type="button">
-          Thoát ứng dụng
-        </button>
-      </div>
-      <div class="brand-block">
-        <h1>Tài khoản Codex</h1>
-        <p class="subtitle">Lấy OTP, theo dõi quota và đồng bộ tài khoản tại một nơi.</p>
-      </div>
-      <div class="topbar-actions">
         <div class="connection" id="connection-status" aria-live="polite">
           Đang kết nối
         </div>
-        <button class="button button-secondary" id="open-import" type="button">
-          Thêm tài khoản
-        </button>
-        <button class="button button-primary" id="refresh-all" type="button">
-          Đồng bộ tất cả
+        <button class="button button-danger" id="shutdown-application" type="button">
+          Thoát
         </button>
       </div>
+      <nav class="workspace-tabs" role="tablist" aria-label="Khu vực làm việc">
+        <button class="workspace-tab is-active" id="accounts-tab" type="button"
+                role="tab" aria-selected="true" aria-controls="accounts-panel"
+                tabindex="0">
+          Tài khoản
+        </button>
+        <button class="workspace-tab" id="usage-tab" type="button"
+                role="tab" aria-selected="false" aria-controls="usage-panel"
+                tabindex="-1">
+          Thống kê sử dụng
+        </button>
+      </nav>
     </header>
-
-    <nav class="workspace-tabs" role="tablist" aria-label="Khu vực làm việc">
-      <button class="workspace-tab is-active" id="accounts-tab" type="button"
-              role="tab" aria-selected="true" aria-controls="accounts-panel"
-              tabindex="0">
-        Tài khoản
-      </button>
-      <button class="workspace-tab" id="usage-tab" type="button"
-              role="tab" aria-selected="false" aria-controls="usage-panel"
-              tabindex="-1">
-        Thống kê sử dụng
-      </button>
-    </nav>
 
     <div id="accounts-panel" role="tabpanel" aria-labelledby="accounts-tab">
 
-    <section class="summary" aria-label="Tổng quan">
-      <article class="summary-card">
-        <span class="data-label">Tổng tài khoản</span>
-        <strong class="metric-value" id="account-count">0</strong>
-      </article>
-      <article class="summary-card">
-        <span class="data-label">Tự làm mới</span>
-        <strong class="metric-value metric-small" id="refresh-interval">—</strong>
-        <span class="metric-context" id="time-sync-status">
-          Đang lấy giờ chuẩn cho OTP
-        </span>
-      </article>
-      <article class="summary-card">
-        <span class="data-label">Cập nhật gần nhất</span>
-        <strong class="metric-value metric-small" id="last-updated">
-          Đang tải
-        </strong>
-      </article>
-      <article class="summary-card">
-        <span class="data-label">Đồng bộ thành công</span>
-        <strong class="metric-value metric-small" id="sync-success-ratio">
-          0 / 0
-        </strong>
-      </article>
-    </section>
+    <div class="account-overview">
+      <section class="summary" aria-label="Tổng quan">
+        <article class="summary-card">
+          <span class="data-label">Tổng tài khoản</span>
+          <strong class="metric-value" id="account-count">0</strong>
+        </article>
+        <article class="summary-card">
+          <span class="data-label">Tự làm mới</span>
+          <strong class="metric-value metric-small" id="refresh-interval">—</strong>
+          <span class="metric-context" id="time-sync-status">
+            Đang lấy giờ chuẩn cho OTP
+          </span>
+        </article>
+        <article class="summary-card">
+          <span class="data-label">Cập nhật gần nhất</span>
+          <strong class="metric-value metric-small" id="last-updated">
+            Đang tải
+          </strong>
+        </article>
+        <article class="summary-card">
+          <span class="data-label">Đồng bộ thành công</span>
+          <strong class="metric-value metric-small" id="sync-success-ratio">
+            0 / 0
+          </strong>
+        </article>
+      </section>
 
-    <section class="sync-overview" aria-labelledby="sync-heading">
-      <p class="data-label" id="sync-heading">Chi tiết đồng bộ</p>
-      <p class="visually-hidden" id="sync-status" aria-live="polite">
-        Đang kiểm tra trạng thái tài khoản
-      </p>
-      <dl class="sync-breakdown">
-        <div class="sync-item sync-item-success">
-          <dt>Thành công</dt>
-          <dd id="sync-success-count">0</dd>
-        </div>
-        <div class="sync-item sync-item-warning">
-          <dt>Cần đăng nhập</dt>
-          <dd id="sync-login-count">0</dd>
-        </div>
-        <div class="sync-item sync-item-warning">
-          <dt>Chưa liên kết</dt>
-          <dd id="sync-unlinked-count">0</dd>
-        </div>
-        <div class="sync-item sync-item-error">
-          <dt>Lỗi tạm thời</dt>
-          <dd id="sync-error-count">0</dd>
-        </div>
-      </dl>
-    </section>
+      <section class="sync-overview" aria-labelledby="sync-heading">
+        <p class="data-label" id="sync-heading">Chi tiết đồng bộ</p>
+        <p class="visually-hidden" id="sync-status" aria-live="polite">
+          Đang kiểm tra trạng thái tài khoản
+        </p>
+        <dl class="sync-breakdown">
+          <div class="sync-item sync-item-success">
+            <dt>Thành công</dt>
+            <dd id="sync-success-count">0</dd>
+          </div>
+          <div class="sync-item sync-item-warning">
+            <dt>Cần đăng nhập</dt>
+            <dd id="sync-login-count">0</dd>
+          </div>
+          <div class="sync-item sync-item-warning">
+            <dt>Chưa liên kết</dt>
+            <dd id="sync-unlinked-count">0</dd>
+          </div>
+          <div class="sync-item sync-item-error">
+            <dt>Lỗi tạm thời</dt>
+            <dd id="sync-error-count">0</dd>
+          </div>
+        </dl>
+      </section>
+    </div>
 
     <section class="accounts-section" aria-labelledby="accounts-heading">
       <div class="section-heading">
@@ -117,6 +110,12 @@
           </div>
         </div>
         <div class="dashboard-toolbar">
+          <button class="button button-secondary" id="open-import" type="button">
+            Thêm tài khoản
+          </button>
+          <button class="button button-primary" id="refresh-all" type="button">
+            Đồng bộ tất cả
+          </button>
           <label class="visually-hidden" for="account-filter">Lọc danh sách tài khoản</label>
           <select id="account-filter">
             <option value="all">Tất cả tài khoản</option>
@@ -144,89 +143,175 @@
 
     <section class="usage-panel" id="usage-panel" role="tabpanel"
              aria-labelledby="usage-tab" hidden>
-      <div class="usage-heading">
+      <div class="usage-toolbar">
         <div>
-          <p class="section-kicker">THỐNG KÊ SỬ DỤNG</p>
-          <h2>Ảnh chụp quota hiện tại</h2>
+          <label for="token-account-select">Phạm vi tài khoản</label>
+          <select id="token-account-select">
+            <option value="all">Tất cả tài khoản</option>
+          </select>
         </div>
-        <p class="usage-snapshot" id="usage-snapshot-time">Đang tải dữ liệu</p>
+        <div class="usage-freshness" aria-live="polite">
+          <span class="status-badge is-unavailable" id="token-data-status">
+            Đang tải
+          </span>
+          <span class="usage-snapshot" id="token-updated-at">Chưa có dữ liệu</span>
+        </div>
       </div>
 
-      <p class="usage-disclaimer" id="usage-disclaimer">
-        Đây là ảnh chụp trạng thái hiện tại. Quota cũ của tài khoản cần xử lý
-        không được tính vào tổng hợp. Ứng dụng chưa lưu lịch sử, số token hoặc số request.
-      </p>
+      <section class="selected-account-summary" id="selected-account-summary" hidden>
+        <div>
+          <p class="data-label">TÀI KHOẢN</p>
+          <h2 id="selected-account-email">—</h2>
+        </div>
+        <span class="status-badge is-unavailable" id="selected-account-plan">Chưa rõ gói</span>
+      </section>
 
-      <div class="usage-summary" aria-label="Thống kê tổng hợp">
+      <div class="token-kpis" id="token-kpis" aria-label="Chỉ số sử dụng tài khoản" hidden>
         <article class="usage-metric-card">
-          <span class="data-label">Bình quân đã dùng</span>
-          <strong class="metric-value" id="usage-average-used">—</strong>
-          <span class="metric-context">Trên các tài khoản có dữ liệu quota</span>
+          <span class="data-label">Lifetime tokens</span>
+          <strong class="metric-value" id="token-lifetime">—</strong>
+          <span class="metric-context">Tổng token ghi nhận</span>
         </article>
         <article class="usage-metric-card">
-          <span class="data-label">Bình quân còn lại</span>
-          <strong class="metric-value" id="usage-average-remaining">—</strong>
-          <span class="metric-context">Trên các tài khoản có dữ liệu quota</span>
+          <span class="data-label">Peak tokens</span>
+          <strong class="metric-value" id="token-peak">—</strong>
+          <span class="metric-context">Mức cao nhất trong một ngày</span>
         </article>
         <article class="usage-metric-card">
-          <span class="data-label">Có dữ liệu quota</span>
-          <strong class="metric-value" id="usage-known-count">0 / 0</strong>
-          <span class="metric-context" id="usage-unknown-count">0 chưa có dữ liệu</span>
-          <span class="metric-context" id="usage-stale-count">0 cần đồng bộ lại</span>
+          <span class="data-label">Longest task</span>
+          <strong class="metric-value" id="token-longest-task">—</strong>
+          <span class="metric-context">Thời lượng lượt chạy dài nhất</span>
         </article>
         <article class="usage-metric-card">
-          <span class="data-label">Cần xử lý</span>
-          <strong class="metric-value" id="usage-attention-count">0</strong>
+          <span class="data-label">Current streak</span>
+          <strong class="metric-value" id="token-current-streak">—</strong>
+          <span class="metric-context">Số ngày liên tiếp hiện tại</span>
         </article>
         <article class="usage-metric-card">
-          <span class="data-label">Dùng được</span>
-          <strong class="metric-value" id="usage-usable-count">0</strong>
-        </article>
-        <article class="usage-metric-card">
-          <span class="data-label">Quota thấp / hết</span>
-          <strong class="metric-value" id="usage-low-count">0 / 0</strong>
+          <span class="data-label">Longest streak</span>
+          <strong class="metric-value" id="token-longest-streak">—</strong>
+          <span class="metric-context">Chuỗi ngày dài nhất</span>
         </article>
       </div>
 
-      <dl class="usage-details" aria-label="Chi tiết snapshot">
-        <div>
-          <dt>Khoảng quota còn lại</dt>
-          <dd id="usage-range">—</dd>
+      <section class="chart-card heatmap-card" aria-labelledby="token-heatmap-title">
+        <div class="chart-heading heatmap-heading">
+          <div>
+            <p class="data-label">12 THÁNG GẦN NHẤT</p>
+            <h3 id="token-heatmap-title">Token theo ngày</h3>
+          </div>
+          <div class="chart-range-picker" role="group" aria-label="Kiểu tổng hợp heatmap">
+            <button class="chart-range-button is-active" type="button"
+                    data-token-range="daily" aria-pressed="true">Ngày</button>
+            <button class="chart-range-button" type="button"
+                    data-token-range="weekly" aria-pressed="false">Tuần</button>
+            <button class="chart-range-button" type="button"
+                    data-token-range="cumulative" aria-pressed="false">Tích lũy</button>
+          </div>
         </div>
-        <div>
-          <dt>Trung vị còn lại</dt>
-          <dd id="usage-median">—</dd>
+        <div class="heatmap-scroll">
+          <div class="token-heatmap" id="token-heatmap" aria-live="polite"></div>
         </div>
-        <div>
-          <dt>Reset gần nhất</dt>
-          <dd id="usage-next-reset">—</dd>
+        <div class="heatmap-tooltip" id="heatmap-tooltip" role="tooltip" hidden></div>
+        <div class="heatmap-legend" aria-label="Mức token từ thấp đến cao">
+          <span>Ít</span>
+          <i class="heatmap-cell level-0"></i>
+          <i class="heatmap-cell level-1"></i>
+          <i class="heatmap-cell level-2"></i>
+          <i class="heatmap-cell level-3"></i>
+          <i class="heatmap-cell level-4"></i>
+          <span>Nhiều</span>
         </div>
-        <div>
-          <dt>Phân bổ gói</dt>
-          <dd id="usage-plan-distribution">—</dd>
-        </div>
-      </dl>
-
-      <div class="usage-table-wrap">
-        <table class="usage-table">
-          <caption class="visually-hidden">Thống kê quota theo từng tài khoản</caption>
-          <thead>
-            <tr>
-              <th scope="col">Tài khoản</th>
-              <th scope="col">Gói</th>
-              <th scope="col">Đã dùng</th>
-              <th scope="col">Còn lại</th>
-              <th scope="col">Trạng thái</th>
-              <th scope="col">Reset quota</th>
-              <th scope="col">Đồng bộ cuối</th>
-            </tr>
-          </thead>
-          <tbody id="usage-account-rows"></tbody>
-        </table>
-        <p class="empty-usage" id="usage-empty" hidden>
-          Chưa có tài khoản để thống kê.
+        <p class="empty-usage" id="token-usage-empty" hidden>
+          Chưa lấy được dữ liệu token. Hãy đồng bộ lại các tài khoản đã liên kết Codex.
         </p>
-      </div>
+      </section>
+
+      <section class="single-quota-card" id="single-quota-card" hidden>
+        <div>
+          <span class="data-label">Quota còn lại</span>
+          <strong class="metric-value" id="single-quota-remaining">—</strong>
+          <span class="metric-context" id="single-quota-cycle">Chu kỳ: —</span>
+        </div>
+        <dl>
+          <div><dt>Reset</dt><dd id="single-quota-reset">—</dd></div>
+          <div><dt>Trạng thái</dt><dd id="single-quota-status">—</dd></div>
+        </dl>
+      </section>
+
+      <section id="all-account-statistics">
+        <div class="usage-heading quota-heading">
+          <p class="usage-disclaimer" id="usage-disclaimer">
+            Quota là phần trăm cửa sổ giới hạn hiện tại và không quy đổi từ token.
+          </p>
+          <p class="usage-snapshot" id="usage-snapshot-time">Đang tải dữ liệu</p>
+        </div>
+
+        <div class="quota-summary" aria-label="Tình trạng quota">
+          <article class="usage-metric-card quota-primary-card">
+            <span class="data-label">Quota bình quân còn lại</span>
+            <div class="quota-average-value">
+              <strong class="metric-value" id="usage-average-remaining">—</strong>
+              <span>trung bình</span>
+            </div>
+            <div class="quota-average-progress" id="usage-average-progress"
+                 role="progressbar" aria-label="Quota bình quân còn lại"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="usage-average-progress-fill"></span>
+            </div>
+            <div class="quota-coverage">
+              <span id="usage-known-count">0 / 0 có dữ liệu</span>
+              <span id="usage-unknown-count">0 chưa có dữ liệu</span>
+              <span id="usage-stale-count">0 cần đồng bộ</span>
+            </div>
+          </article>
+          <article class="usage-metric-card quota-status-card is-usable">
+            <span class="data-label">Dùng được</span>
+            <strong class="metric-value" id="usage-usable-count">0</strong>
+            <span class="metric-context">Trên 20% quota</span>
+          </article>
+          <article class="usage-metric-card quota-status-card is-attention">
+            <span class="data-label">Cần xử lý</span>
+            <strong class="metric-value" id="usage-attention-count">0</strong>
+            <span class="metric-context">Cần đăng nhập hoặc liên kết</span>
+          </article>
+          <article class="usage-metric-card quota-status-card is-low">
+            <span class="data-label">Quota thấp</span>
+            <strong class="metric-value" id="usage-low-count">0</strong>
+            <span class="metric-context">Còn từ 1–20%</span>
+          </article>
+          <article class="usage-metric-card quota-status-card is-exhausted">
+            <span class="data-label">Hết quota</span>
+            <strong class="metric-value" id="usage-exhausted-count">0</strong>
+            <span class="metric-context">Không còn quota</span>
+          </article>
+        </div>
+
+        <div class="usage-table-wrap">
+          <table class="usage-table">
+            <caption class="visually-hidden">Thống kê quota theo từng tài khoản</caption>
+            <thead>
+              <tr>
+                <th scope="col">Tài khoản</th>
+                <th scope="col">Gói</th>
+                <th scope="col">Lifetime</th>
+                <th scope="col">Peak/ngày</th>
+                <th scope="col">Longest task</th>
+                <th scope="col">Current streak</th>
+                <th scope="col">Longest streak</th>
+                <th scope="col">Quota còn lại</th>
+                <th scope="col">Trạng thái</th>
+                <th scope="col">Reset quota</th>
+                <th scope="col">Đồng bộ cuối</th>
+              </tr>
+            </thead>
+            <tbody id="usage-account-rows"></tbody>
+          </table>
+          <p class="empty-usage" id="usage-empty" hidden>
+            Không có tài khoản phù hợp bộ lọc.
+          </p>
+        </div>
+      </section>
     </section>
 
     <footer class="privacy-note">
@@ -239,7 +324,7 @@
       <div class="dialog-header">
         <div>
           <p class="section-kicker">THÊM TÀI KHOẢN</p>
-          <h2 id="dialog-title">Thêm hoặc cập nhật</h2>
+          <h2 id="dialog-title">Thêm tài khoản</h2>
         </div>
         <button class="button button-quiet" id="close-import" type="button">
           Đóng
@@ -249,34 +334,23 @@
       <div class="import-content">
         <label for="account-lines">Thông tin tài khoản</label>
         <p class="field-hint" id="account-format">
-          Mỗi dòng theo định dạng: email|password|secret
+          Nhập một tài khoản theo định dạng: email|password|secret
         </p>
-        <textarea id="account-lines" rows="7" spellcheck="false"
-                  autocomplete="off" autocapitalize="off"
-                  aria-describedby="account-format account-security"
-                  placeholder="user@example.com|password|TOTP_SECRET"></textarea>
+        <input id="account-lines" type="text" spellcheck="false"
+               autocomplete="off" autocapitalize="off"
+               aria-describedby="account-format account-security import-result"
+               placeholder="user@example.com|password|TOTP_SECRET">
         <p class="security-note" id="account-security">
-          Dữ liệu được mã hóa bằng tài khoản Windows hiện tại trước khi lưu.
+          Email và secret được kiểm tra trùng trước khi lưu. Dữ liệu được mã hóa
+          bằng tài khoản Windows hiện tại.
         </p>
         <div class="import-result" id="import-result" aria-live="polite"></div>
-        <div class="import-preview" id="import-preview" hidden>
-          <p class="preview-heading">Bản xem trước</p>
-          <dl class="preview-counts" id="preview-counts"></dl>
-          <ul class="preview-changes" id="preview-changes"></ul>
-        </div>
-        <label class="checkbox-field" for="reject-on-errors">
-          <input id="reject-on-errors" type="checkbox" checked>
-          <span>Không lưu nếu có bất kỳ dòng lỗi nào</span>
-        </label>
         <div class="dialog-actions">
           <button class="button button-secondary" id="cancel-import" type="button">
             Hủy
           </button>
-          <button class="button button-secondary" id="preview-import" type="button">
-            Xem trước
-          </button>
           <button class="button button-primary" id="import-accounts" type="button" disabled>
-            Xác nhận lưu
+            Thêm tài khoản
           </button>
         </div>
       </div>

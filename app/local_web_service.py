@@ -10,12 +10,17 @@ import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 from .codex_sync import CodexProfileSession, CodexReloginRequired
-from .local_web_accounts import merge_accounts, plan_account_merge
+from .local_web_accounts import (
+    AccountConflictError,
+    append_new_account,
+    find_account_conflict,
+    parse_new_account,
+)
 from .local_web_profiles import (
     archive_profile_directory,
     list_orphan_profile_directories,
@@ -39,27 +44,15 @@ from .otp_codex_manager_with_account_status import (
     requires_codex_relogin,
 )
 from .trusted_clock import TrustedClock, get_default_trusted_clock
+from .token_usage import (
+    TokenUsageCacheEntry,
+    build_token_usage_statistics,
+    normalize_token_usage,
+)
 
 
 class AccountNotFoundError(LookupError):
     pass
-
-
-class ImportPreviewError(ValueError):
-    pass
-
-
-class ImportPreviewConflictError(ImportPreviewError):
-    pass
-
-
-@dataclass(frozen=True)
-class _ImportPreview:
-    accounts_fingerprint: str
-    accounts: tuple[Account, ...]
-    result: dict
-    changes: tuple[dict[str, str], ...]
-    created_at: float
 
 
 _ATTENTION_TERMS = (
@@ -72,6 +65,7 @@ _ATTENTION_TERMS = (
     "sai tài khoản",
 )
 _QUOTA_PATTERN = re.compile(r"-?\d+(?:[.,]\d+)?")
+_TOKEN_USAGE_CACHE_TTL_SECONDS = 300.0
 
 
 def account_display_sort_key(
@@ -126,12 +120,12 @@ class LocalWebService:
         self._scheduler_thread: threading.Thread | None = None
         self._accounts: tuple[Account, ...] = ()
         self._codex_info: dict[str, CodexInfo] = {}
+        self._token_usage_cache: dict[str, TokenUsageCacheEntry] = {}
         self._sessions: dict[str, CodexProfileSession] = {}
         self._login_processes: dict[str, subprocess.Popen] = {}
         self._relogin_required: set[str] = set()
         self._started = False
         self._sync_status = "Chưa đồng bộ"
-        self._import_previews: dict[str, _ImportPreview] = {}
 
     def start(self) -> None:
         with self._lock:
@@ -233,100 +227,57 @@ class LocalWebService:
             "time_sync": time_sync,
         }
 
-    def preview_import(self, raw_text: str) -> dict:
-        with self._account_write_lock:
-            with self._lock:
-                current_accounts = tuple(self._accounts)
-            new_accounts, result, changes = plan_account_merge(
-                current_accounts,
-                raw_text,
-            )
-            token = secrets.token_urlsafe(32)
-            preview = _ImportPreview(
-                accounts_fingerprint=self._accounts_fingerprint(
-                    current_accounts
-                ),
-                accounts=new_accounts,
-                result=result,
-                changes=changes,
-                created_at=time.monotonic(),
-            )
-            with self._lock:
-                self._prune_import_previews_locked()
-                self._import_previews = {
-                    **self._import_previews,
-                    token: preview,
-                }
-
-        return {
-            "preview_token": token,
-            "counts": {
-                "added": result["added"],
-                "updated": result["updated"],
-                "duplicates": result["duplicates"],
-                "errors": result["error_count"],
-            },
-            "changes": [dict(change) for change in changes],
-            "errors": list(result["errors"]),
-        }
-
-    def apply_import_preview(
-        self,
-        preview_token: str,
-        reject_on_errors: bool,
-    ) -> dict:
-        with self._account_write_lock:
-            with self._lock:
-                self._prune_import_previews_locked()
-                preview = self._import_previews.get(preview_token)
-                current_accounts = tuple(self._accounts)
-
-            if preview is None:
-                raise ImportPreviewError(
-                    "Bản xem trước không hợp lệ hoặc đã hết hạn."
-                )
-
-            with self._lock:
-                self._import_previews = {
-                    token: item
-                    for token, item in self._import_previews.items()
-                    if token != preview_token
-                }
-
-            if not secrets.compare_digest(
-                preview.accounts_fingerprint,
-                self._accounts_fingerprint(current_accounts),
-            ):
-                raise ImportPreviewConflictError(
-                    "Danh sách tài khoản đã thay đổi. Hãy xem trước lại."
-                )
-            if reject_on_errors and preview.result["errors"]:
-                raise ImportPreviewConflictError(
-                    "Bản xem trước còn lỗi nên chưa có dữ liệu nào được lưu."
-                )
-
-            self._save_accounts(preview.accounts)
-            with self._lock:
-                self._accounts = preview.accounts
-                self._sync_codex_info_locked()
-
-        if preview.result["added"] or preview.result["updated"]:
-            self.refresh_async(
+    def token_usage_statistics(self) -> dict[str, object]:
+        with self._lock:
+            accounts = [
                 {
-                    self.account_id(account.email)
-                    for account in preview.accounts
+                    "account_id": self.account_id(account.email),
+                    "email": account.email,
                 }
-            )
+                for account in self._accounts
+            ]
+            entries = dict(self._token_usage_cache)
+
+        return build_token_usage_statistics(
+            accounts=accounts,
+            entries=entries,
+            now=self._trusted_local_datetime(),
+        )
+
+    def _trusted_local_datetime(self) -> datetime:
+        return datetime.fromtimestamp(
+            self._trusted_clock.now(),
+        ).astimezone()
+
+    def check_account(self, raw_text: str) -> dict[str, object]:
+        try:
+            candidate = parse_new_account(raw_text)
+        except ValueError as error:
+            return {
+                "valid": False,
+                "conflict": "invalid",
+                "message": str(error),
+            }
+
+        with self._lock:
+            conflict = find_account_conflict(self._accounts, candidate)
+        if conflict is not None:
+            return {
+                "valid": False,
+                "conflict": conflict,
+                "message": str(AccountConflictError(conflict)),
+            }
         return {
-            **preview.result,
-            "errors": list(preview.result["errors"]),
+            "valid": True,
+            "conflict": None,
+            "message": "Tài khoản có thể được thêm.",
         }
 
-    def import_accounts(self, raw_text: str) -> dict:
+    def import_accounts(self, raw_text: str) -> dict[str, object]:
         with self._account_write_lock:
             with self._lock:
                 current_accounts = tuple(self._accounts)
-            new_accounts, result = merge_accounts(
+            new_accounts, candidate = append_new_account(
                 current_accounts,
                 raw_text,
             )
@@ -336,15 +287,11 @@ class LocalWebService:
                 self._accounts = new_accounts
                 self._sync_codex_info_locked()
 
-        if result["added"] or result["updated"]:
-            self.refresh_async(
-                {
-                    self.account_id(account.email)
-                    for account in new_accounts
-                }
-            )
-
-        return result
+        self.refresh_async({self.account_id(candidate.email)})
+        return {
+            "total": len(new_accounts),
+            "email": candidate.email,
+        }
 
     def delete_account(self, account_id: str) -> bool:
         with self._account_write_lock:
@@ -362,6 +309,7 @@ class LocalWebService:
             with self._lock:
                 self._accounts = new_accounts
                 self._codex_info.pop(key, None)
+                self._token_usage_cache.pop(key, None)
                 self._relogin_required.discard(key)
                 session = self._sessions.pop(key, None)
 
@@ -380,6 +328,7 @@ class LocalWebService:
                 self._close_session(key)
                 archive_profile_directory(self.profiles_dir, profile_dir)
                 with self._lock:
+                    self._token_usage_cache.pop(key, None)
                     self._relogin_required.discard(key)
                     current = self._codex_info.get(key)
                     if current is not None:
@@ -409,6 +358,7 @@ class LocalWebService:
                 profile_dir.mkdir(parents=False, exist_ok=False)
                 protect_sensitive_path(profile_dir)
                 with self._lock:
+                    self._token_usage_cache.pop(key, None)
                     self._relogin_required.discard(key)
                     current = self._codex_info.get(key)
                     if current is not None:
@@ -461,6 +411,8 @@ class LocalWebService:
     def refresh_async(
         self,
         account_ids: set[str] | None = None,
+        *,
+        force_token_usage: bool = False,
     ) -> bool:
         if not self.enable_codex:
             return False
@@ -482,7 +434,7 @@ class LocalWebService:
 
         threading.Thread(
             target=self._run_refresh,
-            args=(accounts,),
+            args=(accounts, force_token_usage),
             name="codex-web-refresh",
             daemon=True,
         ).start()
@@ -509,6 +461,7 @@ class LocalWebService:
 
         with self._lock:
             session = self._sessions.pop(key, None)
+            self._token_usage_cache.pop(key, None)
             self._relogin_required.discard(key)
 
         if session is not None:
@@ -595,29 +548,6 @@ class LocalWebService:
 
     def profile_directory(self, email: str) -> Path:
         return self.profiles_dir / profile_directory_for(email).name
-
-    @staticmethod
-    def _accounts_fingerprint(accounts: tuple[Account, ...]) -> str:
-        digest = hashlib.sha256()
-        for account in accounts:
-            for value in (
-                account.email.casefold(),
-                account.password,
-                account.secret,
-            ):
-                encoded = value.encode("utf-8")
-                digest.update(len(encoded).to_bytes(8, "big"))
-                digest.update(encoded)
-        return digest.hexdigest()
-
-    def _prune_import_previews_locked(self) -> None:
-        cutoff = time.monotonic() - 600
-        retained = [
-            (token, preview)
-            for token, preview in self._import_previews.items()
-            if preview.created_at >= cutoff
-        ][-63:]
-        self._import_previews = dict(retained)
 
     @staticmethod
     def _recommend_account(rows: list[dict[str, object]]) -> dict | None:
@@ -980,6 +910,11 @@ class LocalWebService:
             for key, value in self._codex_info.items()
             if key in current_keys
         }
+        self._token_usage_cache = {
+            key: value
+            for key, value in self._token_usage_cache.items()
+            if key in current_keys
+        }
 
         for account in self._accounts:
             key = account.email.casefold()
@@ -1002,6 +937,7 @@ class LocalWebService:
     def _run_refresh(
         self,
         accounts: tuple[Account, ...],
+        force_token_usage: bool,
     ) -> None:
         summary = {
             "success": 0,
@@ -1019,6 +955,7 @@ class LocalWebService:
                     executor.submit(
                         self._refresh_account,
                         account,
+                        force_token_usage,
                     )
                     for account in accounts
                 ]
@@ -1039,12 +976,23 @@ class LocalWebService:
                 )
             self._sync_lock.release()
 
-    def _refresh_account(self, account: Account) -> str:
+    def _refresh_account(
+        self,
+        account: Account,
+        force_token_usage: bool = False,
+    ) -> str:
         key = account.email.casefold()
         with self._profile_lock_for(key):
-            return self._refresh_account_locked(account)
+            return self._refresh_account_locked(
+                account,
+                force_token_usage,
+            )
 
-    def _refresh_account_locked(self, account: Account) -> str:
+    def _refresh_account_locked(
+        self,
+        account: Account,
+        force_token_usage: bool = False,
+    ) -> str:
         key = account.email.casefold()
         profile_dir = self.profile_directory(account.email)
         auth_file = profile_dir / "auth.json"
@@ -1059,6 +1007,7 @@ class LocalWebService:
             self._close_session(key)
 
             with self._lock:
+                self._token_usage_cache.pop(key, None)
                 self._codex_info[key] = replace(
                     current,
                     status="Chưa liên kết",
@@ -1074,11 +1023,23 @@ class LocalWebService:
             )
 
         try:
-            result = self._get_session(
+            session = self._get_session(
                 key,
                 profile_dir,
-            ).query()
+            )
+            result = session.query()
             self._apply_codex_result(key, result)
+            with self._lock:
+                is_current_account = (
+                    self._codex_info[key].account_state
+                    == "Hoạt động bình thường"
+                )
+            if is_current_account:
+                self._refresh_token_usage(
+                    key,
+                    session,
+                    force=force_token_usage,
+                )
             return "success"
         except CodexReloginRequired:
             self._mark_relogin(key)
@@ -1111,6 +1072,60 @@ class LocalWebService:
                         ),
                     )
             return "error"
+
+    def _refresh_token_usage(
+        self,
+        key: str,
+        session: CodexProfileSession,
+        *,
+        force: bool,
+    ) -> None:
+        attempted_at = time.monotonic()
+        with self._lock:
+            current = self._token_usage_cache.get(key)
+
+        if (
+            not force
+            and current is not None
+            and attempted_at - current.last_attempt_monotonic
+            < _TOKEN_USAGE_CACHE_TTL_SECONDS
+        ):
+            return
+
+        trusted_now = self._trusted_local_datetime()
+        try:
+            snapshot = normalize_token_usage(
+                session.read_token_usage(),
+                today=trusted_now.date(),
+            )
+        except Exception:
+            fallback = TokenUsageCacheEntry(
+                snapshot=(current.snapshot if current is not None else None),
+                last_attempt_monotonic=attempted_at,
+                updated_at=(current.updated_at if current is not None else None),
+                stale=(
+                    current is not None
+                    and current.snapshot is not None
+                ),
+            )
+            with self._lock:
+                self._token_usage_cache = {
+                    **self._token_usage_cache,
+                    key: fallback,
+                }
+            return
+
+        entry = TokenUsageCacheEntry(
+            snapshot=snapshot,
+            last_attempt_monotonic=attempted_at,
+            updated_at=trusted_now,
+            stale=False,
+        )
+        with self._lock:
+            self._token_usage_cache = {
+                **self._token_usage_cache,
+                key: entry,
+            }
 
     def _get_session(
         self,
@@ -1193,6 +1208,7 @@ class LocalWebService:
             if current is None:
                 return
 
+            self._token_usage_cache.pop(key, None)
             self._relogin_required.add(key)
             self._codex_info[key] = replace(
                 current,
@@ -1226,6 +1242,7 @@ class LocalWebService:
             != current.stored_email.casefold()
         ):
             with self._lock:
+                self._token_usage_cache.pop(key, None)
                 self._relogin_required.add(key)
                 self._codex_info[key] = replace(
                     current,

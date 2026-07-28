@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -16,22 +17,29 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .build_info import API_SCHEMA_VERSION, APP_BUILD_ID
-from .local_web_profiles import UnsafeProfilePathError
-from .local_web_service import (
-    AccountNotFoundError,
-    ImportPreviewConflictError,
-    ImportPreviewError,
-    LocalWebService,
+from .build_info import (
+    API_SCHEMA_VERSION,
+    APP_BUILD_ID,
+    FRONTEND_ASSETS_DIR,
+    FRONTEND_STATIC_ASSETS_DIR,
+    PROJECT_ROOT,
 )
+from .local_web_accounts import AccountConflictError
+from .local_web_profiles import UnsafeProfilePathError
+from .local_web_service import AccountNotFoundError, LocalWebService
 from .otp_codex_manager_with_account_status import (
     CODEX_PROFILES_DIR,
     DATA_FILE,
 )
 
 
-ASSETS_DIR = Path(__file__).resolve().parents[1] / "web"
+LEGACY_ASSETS_DIR = PROJECT_ROOT / "web"
+ASSETS_DIR = FRONTEND_ASSETS_DIR
+STATIC_ASSETS_DIR = FRONTEND_STATIC_ASSETS_DIR
 LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+STATIC_ASSET_REFERENCE = re.compile(
+    r"""(?:src|href)=["']/assets/([^"'?#]+)""",
+)
 
 
 class AccountState(BaseModel):
@@ -99,6 +107,98 @@ class UsageStatistics(BaseModel):
     accounts: list[AccountUsageStatistics]
 
 
+class TokenUsageCoverage(BaseModel):
+    total_accounts: int
+    fresh_accounts: int
+    stale_accounts: int
+    unavailable_accounts: int
+
+
+class TokenUsagePeriod(BaseModel):
+    start_date: str
+    end_date: str
+    is_partial: bool
+
+
+class TokenUsagePeriods(BaseModel):
+    today: TokenUsagePeriod
+    current_week: TokenUsagePeriod
+    current_month: TokenUsagePeriod
+
+
+class TokenUsageSeriesPoint(BaseModel):
+    start_date: str
+    end_date: str
+    tokens: int | None
+
+
+class TokenUsageSeries(BaseModel):
+    daily: list[TokenUsageSeriesPoint]
+    weekly: list[TokenUsageSeriesPoint]
+    monthly: list[TokenUsageSeriesPoint]
+
+
+class TokenUsageDailyBucket(BaseModel):
+    start_date: str
+    tokens: int
+
+
+class TokenUsageTotals(BaseModel):
+    today: int | None
+    week: int | None
+    month: int | None
+    lifetime: int | None
+
+
+class TokenUsageAverages(BaseModel):
+    today: float | None
+    week: float | None
+    month: float | None
+    lifetime: float | None
+
+
+class TokenUsageSampleSizes(BaseModel):
+    today: int
+    week: int
+    month: int
+    lifetime: int
+
+
+class TokenUsageAggregate(BaseModel):
+    totals: TokenUsageTotals
+    averages: TokenUsageAverages
+    sample_sizes: TokenUsageSampleSizes
+    daily_buckets: list[TokenUsageDailyBucket] | None
+    series: TokenUsageSeries
+
+
+class TokenUsageAccount(BaseModel):
+    account_id: str
+    email: str
+    status: Literal["fresh", "stale", "unavailable"]
+    updated_at: str | None
+    today: int | None
+    week: int | None
+    month: int | None
+    lifetime: int | None
+    peak_daily: int | None
+    longest_running_turn_seconds: int | None
+    current_streak_days: int | None
+    longest_streak_days: int | None
+    daily_buckets: list[TokenUsageDailyBucket] | None
+    series: TokenUsageSeries
+
+
+class TokenUsageResponse(BaseModel):
+    schema_version: Literal[2]
+    source: Literal["codex_account_usage"]
+    generated_at: str
+    coverage: TokenUsageCoverage
+    periods: TokenUsagePeriods
+    aggregate: TokenUsageAggregate
+    accounts: list[TokenUsageAccount]
+
+
 class TimeSyncState(BaseModel):
     status: Literal["synced", "syncing", "degraded"]
     offset_seconds: float | None
@@ -123,40 +223,19 @@ class BootstrapResponse(BaseModel):
     state: StateResponse
 
 
-class ImportPreviewRequest(BaseModel):
+class AccountInputRequest(BaseModel):
     lines: str = Field(min_length=1, max_length=100_000)
 
 
-class ImportChange(BaseModel):
-    email: str
-    action: Literal["add", "update"]
+class AccountCheckResponse(BaseModel):
+    valid: bool
+    conflict: Literal["email", "secret", "invalid"] | None
+    message: str
 
 
-class ImportPreviewCounts(BaseModel):
-    added: int
-    updated: int
-    duplicates: int
-    errors: int
-
-
-class ImportPreviewResponse(BaseModel):
-    preview_token: str
-    counts: ImportPreviewCounts
-    changes: list[ImportChange]
-    errors: list[str]
-
-
-class ApplyImportRequest(BaseModel):
-    preview_token: str = Field(min_length=32, max_length=128)
-    reject_on_errors: bool = False
-
-
-class ImportAccountsResponse(BaseModel):
+class AddAccountResponse(BaseModel):
     total: int
-    added: int
-    updated: int
-    duplicates: int
-    errors: list[str]
+    email: str
 
 
 class SensitiveValueRequest(BaseModel):
@@ -177,6 +256,7 @@ class RefreshRequest(BaseModel):
         min_length=16,
         max_length=16,
     )
+    force_token_usage: bool = False
 
 
 class ActionResponse(BaseModel):
@@ -281,7 +361,39 @@ def create_app(
     service: LocalWebService | None = None,
     assets_dir: Path = ASSETS_DIR,
     shutdown_callback: Callable[[], None] | None = None,
+    *,
+    static_assets_dir: Path | None = STATIC_ASSETS_DIR,
 ) -> FastAPI:
+    active_static_assets_dir = static_assets_dir or assets_dir
+    if static_assets_dir is not None:
+        index_path = assets_dir / "index.html"
+        missing_paths = []
+        if not index_path.is_file():
+            missing_paths.append(str(index_path))
+        if not static_assets_dir.is_dir():
+            missing_paths.append(str(static_assets_dir))
+
+        if not missing_paths:
+            static_root = static_assets_dir.resolve()
+            index_content = index_path.read_text(encoding="utf-8")
+            references = STATIC_ASSET_REFERENCE.findall(index_content)
+            if not references:
+                missing_paths.append("no /assets/ references in index.html")
+            for reference in references:
+                target = (static_root / reference).resolve()
+                if (
+                    not target.is_relative_to(static_root)
+                    or not target.is_file()
+                ):
+                    missing_paths.append(reference)
+
+        if missing_paths:
+            missing = ", ".join(missing_paths)
+            raise FileNotFoundError(
+                "Production frontend build is incomplete: "
+                f"missing {missing}."
+            )
+
     active_service = service or LocalWebService(
         data_file=DATA_FILE,
         profiles_dir=CODEX_PROFILES_DIR,
@@ -432,48 +544,49 @@ def create_app(
             active_service.state()
         )
 
+    @app.get(
+        "/api/usage/tokens",
+        response_model=TokenUsageResponse,
+    )
+    def token_usage() -> TokenUsageResponse:
+        return TokenUsageResponse.model_validate(
+            active_service.token_usage_statistics()
+        )
+
     @app.post(
-        "/api/accounts/import/preview",
-        response_model=ImportPreviewResponse,
+        "/api/accounts/import/check",
+        response_model=AccountCheckResponse,
         dependencies=[Depends(require_csrf)],
     )
-    def preview_import(
-        request: ImportPreviewRequest,
-    ) -> ImportPreviewResponse:
+    def check_account(
+        request: AccountInputRequest,
+    ) -> AccountCheckResponse:
+        return AccountCheckResponse.model_validate(
+            active_service.check_account(request.lines)
+        )
+
+    @app.post(
+        "/api/accounts/import",
+        response_model=AddAccountResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def import_accounts(
+        request: AccountInputRequest,
+    ) -> AddAccountResponse:
         try:
-            result = active_service.preview_import(request.lines)
+            result = active_service.import_accounts(request.lines)
+        except AccountConflictError as error:
+            raise HTTPException(
+                status_code=409,
+                detail=str(error),
+            ) from error
         except ValueError as error:
             raise HTTPException(
                 status_code=400,
                 detail=str(error),
             ) from error
-        return ImportPreviewResponse.model_validate(result)
 
-    @app.post(
-        "/api/accounts/import",
-        response_model=ImportAccountsResponse,
-        dependencies=[Depends(require_csrf)],
-    )
-    def import_accounts(
-        request: ApplyImportRequest,
-    ) -> ImportAccountsResponse:
-        try:
-            result = active_service.apply_import_preview(
-                request.preview_token,
-                request.reject_on_errors,
-            )
-        except ImportPreviewConflictError as error:
-            raise HTTPException(
-                status_code=409,
-                detail=str(error),
-            ) from error
-        except ImportPreviewError as error:
-            raise HTTPException(
-                status_code=400,
-                detail=str(error),
-            ) from error
-
-        return ImportAccountsResponse.model_validate(result)
+        return AddAccountResponse.model_validate(result)
 
     @app.delete(
         "/api/accounts/{account_id}",
@@ -530,7 +643,8 @@ def create_app(
         )
         return ActionResponse(
             accepted=active_service.refresh_async(
-                account_ids
+                account_ids,
+                force_token_usage=request.force_token_usage,
             )
         )
 
@@ -637,7 +751,10 @@ def create_app(
 
     app.mount(
         "/assets",
-        StaticFiles(directory=assets_dir, check_dir=False),
+        StaticFiles(
+            directory=active_static_assets_dir,
+            check_dir=False,
+        ),
         name="assets",
     )
 

@@ -1,0 +1,41 @@
+{
+  "date": "2026-07-24",
+  "scope": "frontend Vue PC production build and Chrome median of 3",
+  "bundle": {
+    "initial_accounts_javascript_raw_kb": 113.48,
+    "initial_accounts_javascript_gzip_kb": 44.67,
+    "lazy_usage_javascript_raw_kb": 3.31,
+    "lazy_usage_javascript_gzip_kb": 1.71,
+    "lazy_webgl_worker_raw_kb": 2.45,
+    "css_raw_kb": 8.16,
+    "css_gzip_kb": 2.60
+  },
+  "page_pc_median": {
+    "samples": 3,
+    "viewport": "1440x1000",
+    "fcp_ms": 736,
+    "ttfb_ms": 37,
+    "transferred_bytes": 158735,
+    "request_count": 12,
+    "maximum_long_task_ms": 0,
+    "ideal_long_task_target_met": true
+  },
+  "budgets": {
+    "javascript_gzip_kb": 180,
+    "css_gzip_kb": 35,
+    "glass_idle_stop_ms": 500,
+    "device_pixel_ratio_cap": 2,
+    "fcp_ms": 1800,
+    "ttfb_ms": 800,
+    "page_weight_bytes": 1000000,
+    "ideal_median_maximum_long_task_ms": 50,
+    "hard_median_maximum_long_task_ms": 100
+  },
+  "visual_acceptance": {
+    "platform": "pc-only",
+    "accounts_matrix": "light/dark x full/reduced/off",
+    "usage": "dark/full",
+    "import_dialog": "light/full"
+  },
+  "result": "pass"
+}

@@ -147,6 +147,10 @@ class CodexProfileSession:
 
         raise CodexSessionError(str(last_error or "Không đọc được Codex."))
 
+    def read_token_usage(self) -> dict:
+        """Đọc thống kê token từ app-server trên phiên đang chạy."""
+        return self._request("account/usage/read")
+
     def restart(self) -> None:
         """Dừng process hiện tại; request kế tiếp sẽ mở lại."""
         with self._lifecycle_lock:

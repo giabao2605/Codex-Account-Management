@@ -6,6 +6,10 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
+node_modules/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
 
 # Virtual environments and local configuration
 .venv/

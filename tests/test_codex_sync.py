@@ -11,6 +11,7 @@ from unittest import mock
 
 from app.codex_sync import (
     CodexProfileSession,
+    CodexProtocolError,
     CodexReloginRequired,
     CodexSessionError,
     merge_sparse_dict,
@@ -70,6 +71,77 @@ FAKE_APP_SERVER = textwrap.dedent(
                             "resetsAt": 1894060800,
                         },
                     },
+                },
+            }), flush=True)
+        elif method == "account/usage/read":
+            print(json.dumps({
+                "id": message_id,
+                "result": {
+                    "dailyUsageBuckets": [{
+                        "startDate": "2026-07-23",
+                        "tokens": 1500,
+                    }],
+                    "summary": {
+                        "lifetimeTokens": 1500,
+                        "peakDailyTokens": 1500,
+                        "currentStreakDays": 1,
+                        "longestStreakDays": 1,
+                        "longestRunningTurnSec": 60,
+                    },
+                },
+            }), flush=True)
+    """
+)
+
+
+FAKE_NULL_DAILY_USAGE_SERVER = textwrap.dedent(
+    r"""
+    import json
+    import sys
+
+    for raw_line in sys.stdin:
+        message = json.loads(raw_line)
+        method = message.get("method")
+        message_id = message.get("id")
+
+        if method == "initialize":
+            print(json.dumps({"id": message_id, "result": {}}), flush=True)
+        elif method == "account/usage/read":
+            print(json.dumps({
+                "id": message_id,
+                "result": {
+                    "dailyUsageBuckets": None,
+                    "summary": {
+                        "lifetimeTokens": 0,
+                        "peakDailyTokens": 0,
+                        "currentStreakDays": 0,
+                        "longestStreakDays": 0,
+                        "longestRunningTurnSec": 0,
+                    },
+                },
+            }), flush=True)
+    """
+)
+
+
+FAKE_USAGE_ERROR_SERVER = textwrap.dedent(
+    r"""
+    import json
+    import sys
+
+    for raw_line in sys.stdin:
+        message = json.loads(raw_line)
+        method = message.get("method")
+        message_id = message.get("id")
+
+        if method == "initialize":
+            print(json.dumps({"id": message_id, "result": {}}), flush=True)
+        elif method == "account/usage/read":
+            print(json.dumps({
+                "id": message_id,
+                "error": {
+                    "code": -32601,
+                    "message": "Method not found",
                 },
             }), flush=True)
     """
@@ -418,6 +490,84 @@ class PersistentSessionTests(unittest.TestCase):
                 "account_updated",
                 [event for event, _ in events],
             )
+        finally:
+            session.close()
+
+    def test_reads_token_usage_from_account_usage_method(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-u", "-c", FAKE_APP_SERVER],
+            environment=os.environ.copy(),
+            timeout_seconds=3,
+        )
+
+        try:
+            usage = session.read_token_usage()
+
+            self.assertEqual(usage["summary"]["lifetimeTokens"], 1500)
+            self.assertEqual(
+                usage["dailyUsageBuckets"][0]["startDate"],
+                "2026-07-23",
+            )
+        finally:
+            session.close()
+
+    def test_token_usage_preserves_null_daily_usage_buckets(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[
+                sys.executable,
+                "-u",
+                "-c",
+                FAKE_NULL_DAILY_USAGE_SERVER,
+            ],
+            environment=os.environ.copy(),
+            timeout_seconds=3,
+        )
+
+        try:
+            usage = session.read_token_usage()
+
+            self.assertIsNone(usage["dailyUsageBuckets"])
+        finally:
+            session.close()
+
+    def test_token_usage_surfaces_json_rpc_protocol_error(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[
+                sys.executable,
+                "-u",
+                "-c",
+                FAKE_USAGE_ERROR_SERVER,
+            ],
+            environment=os.environ.copy(),
+            timeout_seconds=3,
+        )
+
+        try:
+            with self.assertRaises(CodexProtocolError) as context:
+                session.read_token_usage()
+
+            self.assertEqual(context.exception.error["code"], -32601)
+        finally:
+            session.close()
+
+    def test_token_usage_reuses_the_persistent_app_server_process(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-u", "-c", FAKE_APP_SERVER],
+            environment=os.environ.copy(),
+            timeout_seconds=3,
+        )
+
+        try:
+            session.query()
+            first_pid = session.process_id
+            session.read_token_usage()
+
+            self.assertIsNotNone(first_pid)
+            self.assertEqual(session.process_id, first_pid)
         finally:
             session.close()
 

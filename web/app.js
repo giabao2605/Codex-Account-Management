@@ -24,30 +24,46 @@ const ui = {
   closeImport: document.querySelector("#close-import"),
   cancelImport: document.querySelector("#cancel-import"),
   accountLines: document.querySelector("#account-lines"),
-  previewImport: document.querySelector("#preview-import"),
-  rejectOnErrors: document.querySelector("#reject-on-errors"),
   importAccounts: document.querySelector("#import-accounts"),
   importResult: document.querySelector("#import-result"),
-  importPreview: document.querySelector("#import-preview"),
-  previewCounts: document.querySelector("#preview-counts"),
-  previewChanges: document.querySelector("#preview-changes"),
   accountGrid: document.querySelector("#account-grid"),
   emptyState: document.querySelector("#empty-state"),
-  tabs: Array.from(document.querySelectorAll('[role="tab"]')),
+  workspaceTabs: Array.from(document.querySelectorAll(".workspace-tab")),
   accountPanel: document.querySelector("#accounts-panel"),
   usagePanel: document.querySelector("#usage-panel"),
-  usageAverageUsed: document.querySelector("#usage-average-used"),
+  tokenAccountSelect: document.querySelector("#token-account-select"),
+  tokenDataStatus: document.querySelector("#token-data-status"),
+  tokenUpdatedAt: document.querySelector("#token-updated-at"),
+  selectedAccountSummary: document.querySelector("#selected-account-summary"),
+  selectedAccountEmail: document.querySelector("#selected-account-email"),
+  selectedAccountPlan: document.querySelector("#selected-account-plan"),
+  tokenKpis: document.querySelector("#token-kpis"),
+  tokenLifetime: document.querySelector("#token-lifetime"),
+  tokenPeak: document.querySelector("#token-peak"),
+  tokenLongestTask: document.querySelector("#token-longest-task"),
+  tokenCurrentStreak: document.querySelector("#token-current-streak"),
+  tokenLongestStreak: document.querySelector("#token-longest-streak"),
+  tokenRangeButtons: Array.from(document.querySelectorAll("[data-token-range]")),
+  tokenHeatmapTitle: document.querySelector("#token-heatmap-title"),
+  tokenHeatmap: document.querySelector("#token-heatmap"),
+  heatmapTooltip: document.querySelector("#heatmap-tooltip"),
+  tokenUsageEmpty: document.querySelector("#token-usage-empty"),
+  singleQuotaCard: document.querySelector("#single-quota-card"),
+  singleQuotaRemaining: document.querySelector("#single-quota-remaining"),
+  singleQuotaCycle: document.querySelector("#single-quota-cycle"),
+  singleQuotaReset: document.querySelector("#single-quota-reset"),
+  singleQuotaStatus: document.querySelector("#single-quota-status"),
+  allAccountStatistics: document.querySelector("#all-account-statistics"),
   usageAverageRemaining: document.querySelector("#usage-average-remaining"),
+  usageAverageProgress: document.querySelector("#usage-average-progress"),
+  usageAverageProgressFill: document.querySelector("#usage-average-progress-fill"),
   usageKnownCount: document.querySelector("#usage-known-count"),
   usageUnknownCount: document.querySelector("#usage-unknown-count"),
   usageStaleCount: document.querySelector("#usage-stale-count"),
   usageAttentionCount: document.querySelector("#usage-attention-count"),
   usageUsableCount: document.querySelector("#usage-usable-count"),
   usageLowCount: document.querySelector("#usage-low-count"),
-  usageRange: document.querySelector("#usage-range"),
-  usageMedian: document.querySelector("#usage-median"),
-  usageNextReset: document.querySelector("#usage-next-reset"),
-  usagePlanDistribution: document.querySelector("#usage-plan-distribution"),
+  usageExhaustedCount: document.querySelector("#usage-exhausted-count"),
   usageSnapshotTime: document.querySelector("#usage-snapshot-time"),
   usageDisclaimer: document.querySelector("#usage-disclaimer"),
   usageAccountRows: document.querySelector("#usage-account-rows"),
@@ -57,7 +73,7 @@ const ui = {
 
 const themeStorageKey = "otp-codex-theme";
 const tokenStorageKey = "otp-codex-access-token";
-const expectedApiSchemaVersion = 3;
+const expectedApiSchemaVersion = 6;
 const fragmentToken = window.location.hash.slice(1);
 if (fragmentToken) {
   window.sessionStorage.setItem(tokenStorageKey, fragmentToken);
@@ -69,11 +85,17 @@ let pollInProgress = false;
 let toastTimer = 0;
 let renderSignature = "";
 let currentState = { accounts: [] };
-let importPreviewToken = "";
-let previewRequestId = 0;
+let accountCheckRequestId = 0;
+let accountCanBeAdded = false;
 let pollTimer = 0;
 let applicationStopping = false;
 let backendCompatible = false;
+let tokenUsageData = null;
+let tokenUsageFetchedAt = 0;
+let tokenFetchInProgress = false;
+let selectedTokenRange = "daily";
+let quotaUsageData = null;
+let tokenRefreshPending = false;
 
 function applyTheme(theme, options = {}) {
   const normalizedTheme = theme === "light" ? "light" : "dark";
@@ -88,7 +110,7 @@ function applyTheme(theme, options = {}) {
   ui.themeToggle.setAttribute("aria-label", nextThemeLabel);
   ui.themeToggle.title = nextThemeLabel;
   ui.themeToggleText.textContent = isDark ? "Giao diện tối" : "Giao diện sáng";
-  ui.themeColor.content = isDark ? "#0b1020" : "#e8edf5";
+  ui.themeColor.content = isDark ? "#0b1020" : "#e1e6ed";
 
   if (options.persist === false) return;
   try {
@@ -507,71 +529,443 @@ function formatGeneratedTime(value) {
   return `Tổng hợp lúc ${date.toLocaleString("vi-VN")}`;
 }
 
-function usageCell(value, className = "") {
-  return element("td", className, value === null || value === undefined ? "—" : String(value));
+function formatTokenCount(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number).toLocaleString("vi-VN") : "—";
 }
 
-function renderUsageStatistics(usageStatistics) {
-  const statistics = usageStatistics || {};
-  const total = Number(statistics.total_accounts || 0);
-  const known = Number(statistics.quota_known_accounts || 0);
-  const low = Number(statistics.low_quota_accounts || 0);
-  const exhausted = Number(statistics.exhausted_accounts || 0);
-  const rows = Array.isArray(statistics.accounts) ? statistics.accounts : [];
+function formatIsoDate(value, options = {}) {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value || "—";
+  return parsed.toLocaleDateString("vi-VN", options);
+}
 
-  ui.usageAverageUsed.textContent = known > 0
-    ? formatUsagePercent(statistics.average_used_percent)
-    : "—";
-  ui.usageAverageRemaining.textContent = known > 0
-    ? formatUsagePercent(statistics.average_remaining_percent)
-    : "—";
-  ui.usageKnownCount.textContent = `${known} / ${total}`;
-  ui.usageUnknownCount.textContent =
-    `${Number(statistics.quota_unknown_accounts || 0)} chưa có dữ liệu`;
-  ui.usageStaleCount.textContent =
-    `${Number(statistics.stale_quota_accounts || 0)} cần đồng bộ lại`;
-  ui.usageAttentionCount.textContent = String(statistics.attention_accounts || 0);
-  ui.usageUsableCount.textContent = String(statistics.usable_accounts || 0);
-  ui.usageLowCount.textContent = `${low} / ${exhausted}`;
-  const minimum = formatUsagePercent(statistics.minimum_remaining_percent);
-  const maximum = formatUsagePercent(statistics.maximum_remaining_percent);
-  ui.usageRange.textContent = known > 0 ? `${minimum} – ${maximum}` : "—";
-  ui.usageMedian.textContent = formatUsagePercent(statistics.median_remaining_percent);
-  ui.usageNextReset.textContent = statistics.next_reset_at || "—";
-  const plans = Array.isArray(statistics.plan_distribution)
-    ? statistics.plan_distribution
-    : [];
-  ui.usagePlanDistribution.textContent = plans.length > 0
-    ? plans.map((plan) => `${plan.plan_type}: ${plan.count}`).join(" · ")
-    : "—";
+function localIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
-  ui.usageSnapshotTime.textContent = formatGeneratedTime(
-    statistics.generated_at,
+function addDays(date, days) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function mondayOf(date) {
+  const offset = (date.getDay() + 6) % 7;
+  return addDays(date, -offset);
+}
+
+function formatDuration(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const seconds = Math.round(Number(value));
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${seconds} giây`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours === 0) return `${minutes} phút`;
+  return minutes > 0 ? `${hours} giờ ${minutes} phút` : `${hours} giờ`;
+}
+
+function formatDays(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const days = Math.round(Number(value));
+  return Number.isFinite(days) && days >= 0 ? `${days} ngày` : "—";
+}
+
+function selectedTokenAccount() {
+  if (ui.tokenAccountSelect.value === "all") return null;
+  return (tokenUsageData?.accounts || []).find(
+    (account) => account.account_id === ui.tokenAccountSelect.value,
+  ) || null;
+}
+
+function selectedQuotaAccount() {
+  return (quotaUsageData?.accounts || []).find(
+    (account) => account.account_id === ui.tokenAccountSelect.value,
+  ) || null;
+}
+
+function selectedDailyBuckets() {
+  if (!tokenUsageData) return null;
+  if (ui.tokenAccountSelect.value === "all") {
+    return tokenUsageData.aggregate?.daily_buckets ?? null;
+  }
+  return selectedTokenAccount()?.daily_buckets ?? null;
+}
+
+function heatmapRange() {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  start.setFullYear(start.getFullYear() - 1);
+  start.setDate(start.getDate() + 1);
+  const gridStart = mondayOf(start);
+  const gridEnd = addDays(mondayOf(end), 6);
+  return {
+    start,
+    end,
+    gridStart,
+    weekCount: Math.round((gridEnd - gridStart) / 604800000) + 1,
+  };
+}
+
+function heatmapLevel(tokens, maximum) {
+  if (tokens <= 0) return 0;
+  return Math.max(1, Math.min(4, Math.ceil((tokens / Math.max(1, maximum)) * 4)));
+}
+
+function heatmapCell(tokens, maximum, tooltip, className = "") {
+  const cell = element(
+    "button",
+    `heatmap-cell level-${heatmapLevel(tokens, maximum)} ${className}`.trim(),
   );
-  if (statistics.history_available === false) {
-    ui.usageDisclaimer.textContent =
-      "Đây là snapshot hiện tại. Quota cũ của tài khoản cần xử lý không được tính vào tổng hợp. Chưa có lịch sử, số token hoặc số request.";
+  cell.type = "button";
+  cell.dataset.tooltip = tooltip;
+  cell.setAttribute("aria-label", tooltip);
+  cell.setAttribute("aria-describedby", "heatmap-tooltip");
+  return cell;
+}
+
+function showHeatmapTooltip(cell) {
+  const tooltip = cell?.dataset.tooltip;
+  if (!tooltip) return;
+  ui.heatmapTooltip.textContent = tooltip;
+  ui.heatmapTooltip.hidden = false;
+  const cellRect = cell.getBoundingClientRect();
+  const tooltipRect = ui.heatmapTooltip.getBoundingClientRect();
+  const left = Math.max(
+    8,
+    Math.min(
+      window.innerWidth - tooltipRect.width - 8,
+      cellRect.left + cellRect.width / 2 - tooltipRect.width / 2,
+    ),
+  );
+  const preferredTop = cellRect.top - tooltipRect.height - 8;
+  const top = preferredTop >= 8 ? preferredTop : cellRect.bottom + 8;
+  ui.heatmapTooltip.style.left = `${left}px`;
+  ui.heatmapTooltip.style.top = `${top}px`;
+}
+
+function hideHeatmapTooltip() {
+  ui.heatmapTooltip.hidden = true;
+}
+
+function renderHeatmap(buckets) {
+  ui.tokenHeatmap.replaceChildren();
+  if (buckets === null) {
+    ui.tokenHeatmap.append(element(
+      "p",
+      "heatmap-unavailable",
+      "Dữ liệu heatmap chưa khả dụng cho phạm vi này.",
+    ));
+    return;
   }
 
+  const range = heatmapRange();
+  const rangeStartKey = localIsoDate(range.start);
+  const rangeEndKey = localIsoDate(range.end);
+  const tokenByDate = new Map();
+  (Array.isArray(buckets) ? buckets : []).forEach((bucket) => {
+    const tokens = Number(bucket.tokens);
+    if (
+      typeof bucket.start_date === "string"
+      && bucket.start_date >= rangeStartKey
+      && bucket.start_date <= rangeEndKey
+      && Number.isFinite(tokens)
+      && tokens >= 0
+    ) {
+      tokenByDate.set(
+        bucket.start_date,
+        (tokenByDate.get(bucket.start_date) || 0) + Math.round(tokens),
+      );
+    }
+  });
+
+  const weeks = Array.from({ length: range.weekCount }, (_, weekIndex) => {
+    const start = addDays(range.gridStart, weekIndex * 7);
+    const days = Array.from({ length: 7 }, (_, dayIndex) => addDays(start, dayIndex));
+    return {
+      start,
+      end: days[6],
+      days,
+      tokens: days.reduce((sum, date) => sum + (tokenByDate.get(localIsoDate(date)) || 0), 0),
+    };
+  }).filter((week) => week.start <= range.end && week.end >= range.start);
+  let cumulative = 0;
+  weeks.forEach((week) => {
+    cumulative += week.tokens;
+    week.cumulative = cumulative;
+  });
+
+  const months = element("div", "heatmap-months");
+  months.style.gridTemplateColumns = `repeat(${weeks.length}, var(--heatmap-cell-size))`;
+  const monthGroups = [];
+  weeks.forEach((week, index) => {
+    const key = `${week.start.getFullYear()}-${week.start.getMonth()}`;
+    const current = monthGroups[monthGroups.length - 1];
+    if (current?.key === key) {
+      current.end = index + 1;
+      return;
+    }
+    monthGroups.push({
+      key,
+      start: index,
+      end: index + 1,
+      date: week.start,
+    });
+  });
+  monthGroups.forEach((group) => {
+    const month = group.date.getMonth() + 1;
+    const label = element("span", "heatmap-month", `T${month}`);
+    label.style.gridColumn = `${group.start + 1} / ${group.end + 1}`;
+    months.append(label);
+  });
+
+  const grid = element("div", `heatmap-grid is-${selectedTokenRange}`);
+  grid.style.gridTemplateColumns = `repeat(${weeks.length}, var(--heatmap-cell-size))`;
+  const values = selectedTokenRange === "daily"
+    ? weeks.flatMap((week) => week.days.map((date) => tokenByDate.get(localIsoDate(date)) || 0))
+    : weeks.map((week) => (
+      selectedTokenRange === "weekly" ? week.tokens : week.cumulative
+    ));
+  const maximum = Math.max(1, ...values);
+
+  if (selectedTokenRange === "daily") {
+    weeks.forEach((week, weekIndex) => {
+      week.days.forEach((date, dayIndex) => {
+        const dateKey = localIsoDate(date);
+        const inRange = date >= range.start && date <= range.end;
+        if (!inRange) return;
+        const tokens = tokenByDate.get(dateKey) || 0;
+        const tooltip = `${formatTokenCount(tokens)} token · ${formatIsoDate(dateKey, {
+          weekday: "short",
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        })}`;
+        const cell = heatmapCell(tokens, maximum, tooltip);
+        cell.style.gridColumn = String(weekIndex + 1);
+        cell.style.gridRow = String(dayIndex + 1);
+        grid.append(cell);
+      });
+    });
+  } else {
+    weeks.forEach((week, weekIndex) => {
+      const tokens = selectedTokenRange === "weekly" ? week.tokens : week.cumulative;
+      const visibleStart = week.start < range.start ? range.start : week.start;
+      const visibleEnd = week.end > range.end ? range.end : week.end;
+      const dateRange = `${formatIsoDate(localIsoDate(visibleStart), {
+        day: "2-digit",
+        month: "2-digit",
+      })}–${formatIsoDate(localIsoDate(visibleEnd), {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      })}`;
+      const prefix = selectedTokenRange === "cumulative" ? "Lũy kế đến tuần" : "Tuần";
+      const tooltip = `${formatTokenCount(tokens)} token · ${prefix} ${dateRange}`;
+      week.days.forEach((_, dayIndex) => {
+        const cell = heatmapCell(tokens, maximum, tooltip);
+        cell.style.gridColumn = String(weekIndex + 1);
+        cell.style.gridRow = String(dayIndex + 1);
+        grid.append(cell);
+      });
+    });
+  }
+
+  ui.tokenHeatmap.append(months, grid);
+}
+
+function renderSingleAccount(account, quotaAccount) {
+  const isSingle = ui.tokenAccountSelect.value !== "all";
+  ui.selectedAccountSummary.hidden = !isSingle;
+  ui.tokenKpis.hidden = !isSingle;
+  ui.singleQuotaCard.hidden = !isSingle;
+  ui.allAccountStatistics.hidden = isSingle;
+  if (!isSingle) return;
+
+  ui.selectedAccountEmail.textContent = quotaAccount?.email || account?.email || "Tài khoản không xác định";
+  ui.selectedAccountPlan.textContent = quotaAccount?.plan_type || "Chưa rõ gói";
+  ui.selectedAccountPlan.className = "status-badge";
+  ui.tokenLifetime.textContent = formatTokenCount(account?.lifetime);
+  ui.tokenPeak.textContent = formatTokenCount(account?.peak_daily);
+  ui.tokenLongestTask.textContent = formatDuration(account?.longest_running_turn_seconds);
+  ui.tokenCurrentStreak.textContent = formatDays(account?.current_streak_days);
+  ui.tokenLongestStreak.textContent = formatDays(account?.longest_streak_days);
+  ui.singleQuotaRemaining.textContent = formatUsagePercent(quotaAccount?.quota_remaining_percent);
+  ui.singleQuotaCycle.textContent = `Chu kỳ: ${quotaAccount?.quota_cycle || "—"}`;
+  ui.singleQuotaReset.textContent = quotaAccount?.quota_reset_at || "—";
+  if (quotaAccount) {
+    const category = quotaCategory(quotaAccount);
+    ui.singleQuotaStatus.replaceChildren(element(
+      "span",
+      `status-badge is-${category}`,
+      quotaCategoryDetails[category].label,
+    ));
+  } else {
+    ui.singleQuotaStatus.textContent = "—";
+  }
+}
+
+function renderTokenUsage() {
+  if (!tokenUsageData) return;
+  const account = selectedTokenAccount();
+  const quotaAccount = selectedQuotaAccount();
+  const coverage = tokenUsageData.coverage || {};
+  const total = Number(coverage.total_accounts ?? tokenUsageData.accounts?.length ?? 0);
+  const fresh = Number(coverage.fresh_accounts || 0);
+  const stale = Number(coverage.stale_accounts || 0);
+  const unavailable = Number(coverage.unavailable_accounts || 0);
+  const buckets = selectedDailyBuckets();
+  const status = account?.status || (
+    buckets === null ? "unavailable" : (stale > 0 ? "stale" : "fresh")
+  );
+  const statusLabels = { fresh: "Mới", stale: "Dữ liệu cũ", unavailable: "Không lấy được" };
+  ui.tokenDataStatus.textContent = statusLabels[status] || "Không lấy được";
+  ui.tokenDataStatus.className = `status-badge is-${status}`;
+  ui.tokenUpdatedAt.textContent = ui.tokenAccountSelect.value === "all"
+    ? `${formatGeneratedTime(tokenUsageData.generated_at)} · ${fresh} mới, ${stale} cũ, ${unavailable} chưa có`
+    : formatGeneratedTime(account?.updated_at || tokenUsageData.generated_at);
+  ui.tokenHeatmapTitle.textContent = {
+    daily: "Token theo ngày",
+    weekly: "Token theo tuần",
+    cumulative: "Token lũy kế",
+  }[selectedTokenRange];
+  renderSingleAccount(account, quotaAccount);
+  renderHeatmap(buckets);
+  ui.tokenUsageEmpty.hidden = true;
+}
+
+function updateTokenAccountOptions() {
+  const selected = ui.tokenAccountSelect.value || "all";
+  const options = [element("option", "", "Tất cả tài khoản")];
+  options[0].value = "all";
+  const accountsById = new Map();
+  (quotaUsageData?.accounts || []).forEach((account) => {
+    accountsById.set(account.account_id, account.email);
+  });
+  (tokenUsageData?.accounts || []).forEach((account) => {
+    if (!accountsById.has(account.account_id)) {
+      accountsById.set(account.account_id, account.email);
+    }
+  });
+  Array.from(accountsById.entries())
+    .sort((left, right) => left[1].localeCompare(right[1]))
+    .forEach(([accountId, email]) => {
+      const option = element("option", "", email);
+      option.value = accountId;
+      options.push(option);
+    });
+  ui.tokenAccountSelect.replaceChildren(...options);
+  ui.tokenAccountSelect.value = options.some((option) => option.value === selected)
+    ? selected
+    : "all";
+}
+
+async function fetchTokenUsage() {
+  if (!backendCompatible || tokenFetchInProgress) return;
+  tokenFetchInProgress = true;
+  ui.tokenDataStatus.textContent = "Đang tải";
+  ui.tokenDataStatus.className = "status-badge is-unavailable";
+  try {
+    tokenUsageData = await api("/api/usage/tokens");
+    tokenUsageFetchedAt = Date.now();
+    updateTokenAccountOptions();
+    renderTokenUsage();
+    if (quotaUsageData) renderQuotaRows();
+  } catch (error) {
+    ui.tokenDataStatus.textContent = "Không lấy được";
+    ui.tokenDataStatus.className = "status-badge is-unavailable";
+    ui.tokenUpdatedAt.textContent = error.message;
+    if (!tokenUsageData) ui.tokenUsageEmpty.hidden = false;
+  } finally {
+    tokenFetchInProgress = false;
+  }
+}
+
+function usageCell(value, className = "", label = "") {
+  const cell = element("td", className, value === null || value === undefined ? "—" : String(value));
+  if (label) cell.dataset.label = label;
+  return cell;
+}
+
+function quotaCategory(account) {
+  if (account.needs_attention) return "attention";
+  const remaining = Number(account.quota_remaining_percent);
+  if (account.quota_remaining_percent !== null && Number.isFinite(remaining)) {
+    if (remaining <= 0) return "exhausted";
+    if (remaining <= 20) return "low";
+  }
+  if (account.quota_is_stale) return "stale";
+  if (account.quota_remaining_percent === null) return "unavailable";
+  return account.is_usable ? "usable" : "unavailable";
+}
+
+const quotaCategoryDetails = {
+  attention: { label: "Cần xử lý", rank: 0 },
+  exhausted: { label: "Hết quota", rank: 1 },
+  low: { label: "Quota thấp", rank: 2 },
+  stale: { label: "Cần đồng bộ", rank: 3 },
+  unavailable: { label: "Chưa có dữ liệu", rank: 4 },
+  usable: { label: "Dùng được", rank: 5 },
+};
+
+function quotaProgressCell(account) {
+  const cell = usageCell(null, "quota-cell", "Quota còn lại");
+  const remaining = account.quota_remaining_percent;
+  const value = Number(remaining);
+  cell.textContent = "";
+  cell.append(element("strong", "usage-number", formatUsagePercent(remaining)));
+  if (remaining !== null && Number.isFinite(value)) {
+    const progress = createProgress(
+      "quota-progress",
+      value,
+      100,
+      `Quota còn lại ${formatUsagePercent(value)} của ${account.email}`,
+    );
+    cell.append(progress);
+  }
+  return cell;
+}
+
+function renderQuotaRows() {
+  const sourceRows = Array.isArray(quotaUsageData?.accounts) ? quotaUsageData.accounts : [];
+  const rows = sourceRows
+    .map((account) => ({ ...account, quota_category: quotaCategory(account) }))
+    .sort((left, right) => (
+      quotaCategoryDetails[left.quota_category].rank
+      - quotaCategoryDetails[right.quota_category].rank
+      || left.email.localeCompare(right.email)
+    ));
   const tableRows = rows.map((account) => {
     const row = element("tr");
-    const identity = usageCell(account.email, "usage-account-email");
-    const status = account.quota_is_stale ? "Cần đồng bộ lại" : (
-      account.needs_attention ? "Cần xử lý" : (
-        account.is_usable ? "Dùng được" : "Chưa sẵn sàng"
-      )
+    const tokenAccount = (tokenUsageData?.accounts || []).find(
+      (item) => item.account_id === account.account_id,
     );
-    const statusCell = usageCell(status, account.needs_attention
-      ? "usage-status is-attention"
-      : "usage-status");
+    row.dataset.quotaCategory = account.quota_category;
+    const statusCell = usageCell(null, "", "Trạng thái");
+    statusCell.textContent = "";
+    statusCell.append(element(
+      "span",
+      `status-badge is-${account.quota_category}`,
+      quotaCategoryDetails[account.quota_category].label,
+    ));
     row.append(
-      identity,
-      usageCell(account.plan_type),
-      usageCell(formatUsagePercent(account.quota_used_percent), "usage-number"),
-      usageCell(formatUsagePercent(account.quota_remaining_percent), "usage-number"),
+      usageCell(account.email, "usage-account-email", "Tài khoản"),
+      usageCell(account.plan_type, "", "Gói"),
+      usageCell(formatTokenCount(tokenAccount?.lifetime), "usage-number", "Lifetime"),
+      usageCell(formatTokenCount(tokenAccount?.peak_daily), "usage-number", "Peak/ngày"),
+      usageCell(formatDuration(tokenAccount?.longest_running_turn_seconds), "", "Longest task"),
+      usageCell(formatDays(tokenAccount?.current_streak_days), "", "Current streak"),
+      usageCell(formatDays(tokenAccount?.longest_streak_days), "", "Longest streak"),
+      quotaProgressCell(account),
       statusCell,
-      usageCell(account.quota_reset_at),
-      usageCell(account.last_sync),
+      usageCell(account.quota_reset_at, "", "Reset quota"),
+      usageCell(account.last_sync, "", "Đồng bộ cuối"),
     );
     return row;
   });
@@ -580,8 +974,43 @@ function renderUsageStatistics(usageStatistics) {
   ui.usageAccountRows.closest("table").hidden = rows.length === 0;
 }
 
-function activateTab(tab) {
-  ui.tabs.forEach((candidate) => {
+function renderUsageStatistics(usageStatistics) {
+  const statistics = usageStatistics || {};
+  quotaUsageData = statistics;
+  const total = Number(statistics.total_accounts || 0);
+  const known = Number(statistics.quota_known_accounts || 0);
+  const rows = Array.isArray(statistics.accounts) ? statistics.accounts : [];
+  const categoryCounts = Object.fromEntries(
+    Object.keys(quotaCategoryDetails).map((key) => [key, 0]),
+  );
+  rows.forEach((account) => {
+    categoryCounts[quotaCategory(account)] += 1;
+  });
+  ui.usageAverageRemaining.textContent = known > 0
+    ? formatUsagePercent(statistics.average_remaining_percent)
+    : "—";
+  const averageRemaining = known > 0
+    ? Math.max(0, Math.min(100, Number(statistics.average_remaining_percent) || 0))
+    : 0;
+  ui.usageAverageProgress.setAttribute("aria-valuenow", String(averageRemaining));
+  ui.usageAverageProgressFill.style.width = `${averageRemaining}%`;
+  ui.usageKnownCount.textContent = `${known} / ${total} có dữ liệu`;
+  ui.usageUnknownCount.textContent = `${Number(statistics.quota_unknown_accounts || 0)} chưa có dữ liệu`;
+  ui.usageStaleCount.textContent = `${Number(statistics.stale_quota_accounts || 0)} cần đồng bộ`;
+  ui.usageAttentionCount.textContent = String(categoryCounts.attention);
+  ui.usageUsableCount.textContent = String(categoryCounts.usable);
+  ui.usageLowCount.textContent = String(categoryCounts.low);
+  ui.usageExhaustedCount.textContent = String(categoryCounts.exhausted);
+  ui.usageSnapshotTime.textContent = formatGeneratedTime(statistics.generated_at);
+  ui.usageDisclaimer.textContent =
+    "Quota là phần trăm cửa sổ giới hạn hiện tại và không quy đổi từ token. Tài khoản cần xử lý hoặc dữ liệu cũ không được tính vào bình quân.";
+  updateTokenAccountOptions();
+  renderQuotaRows();
+  if (tokenUsageData) renderTokenUsage();
+}
+
+function activateTab(tab, tabs) {
+  tabs.forEach((candidate) => {
     const selected = candidate === tab;
     candidate.setAttribute("aria-selected", String(selected));
     candidate.tabIndex = selected ? 0 : -1;
@@ -589,18 +1018,21 @@ function activateTab(tab) {
     const panel = document.querySelector(`#${candidate.getAttribute("aria-controls")}`);
     panel.hidden = !selected;
   });
+  if (tab.id === "usage-tab" && Date.now() - tokenUsageFetchedAt >= 300000) {
+    fetchTokenUsage();
+  }
 }
 
-function handleTabKeydown(event) {
+function handleTabKeydown(event, tabs) {
   let direction = 0;
   if (event.key === "ArrowRight") direction = 1;
   if (event.key === "ArrowLeft") direction = -1;
   if (direction === 0) return;
   event.preventDefault();
-  const currentIndex = ui.tabs.indexOf(event.currentTarget);
-  const nextIndex = (currentIndex + direction + ui.tabs.length) % ui.tabs.length;
-  activateTab(ui.tabs[nextIndex]);
-  ui.tabs[nextIndex].focus();
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
+  activateTab(tabs[nextIndex], tabs);
+  tabs[nextIndex].focus();
 }
 
 function renderState(state) {
@@ -619,6 +1051,13 @@ function renderState(state) {
   );
   renderTimeSyncStatus(state.time_sync);
   renderUsageStatistics(state.usage_statistics);
+  if (
+    tokenRefreshPending
+    && !String(state.sync_status || "").startsWith("Đang đồng bộ")
+  ) {
+    tokenRefreshPending = false;
+    fetchTokenUsage();
+  }
 
   const { usage_statistics: _usageStatistics, ...stableState } = state;
   const nextSignature = JSON.stringify({
@@ -793,10 +1232,14 @@ async function handleCardAction(event) {
       });
       await copyText(payload.value, field === "password" ? "mật khẩu" : "secret");
     } else if (action === "refresh") {
-      await api("/api/codex/refresh", {
+      const result = await api("/api/codex/refresh", {
         method: "POST",
-        body: JSON.stringify({ account_id: accountId }),
+        body: JSON.stringify({
+          account_id: accountId,
+          force_token_usage: true,
+        }),
       });
+      tokenRefreshPending = result.accepted;
       showToast("Đã yêu cầu đồng bộ tài khoản.");
       await pollState();
     } else if (action === "login") {
@@ -836,144 +1279,90 @@ async function handleCardAction(event) {
 }
 
 function openImportDialog() {
-  invalidateImportPreview();
+  resetAccountCheck();
   ui.accountDialog.showModal();
   ui.accountLines.focus();
 }
 
-function invalidateImportPreview() {
-  previewRequestId += 1;
-  importPreviewToken = "";
+function resetAccountCheck() {
+  accountCheckRequestId += 1;
+  accountCanBeAdded = false;
   ui.importResult.textContent = "";
   ui.importResult.className = "import-result";
-  ui.importPreview.hidden = true;
-  ui.previewCounts.replaceChildren();
-  ui.previewChanges.replaceChildren();
   ui.importAccounts.disabled = true;
 }
 
-function consumeImportPreview() {
-  importPreviewToken = "";
-  ui.importPreview.hidden = true;
-  ui.previewCounts.replaceChildren();
-  ui.previewChanges.replaceChildren();
-  ui.importAccounts.disabled = true;
-}
-
-function previewCount(label, value) {
-  const item = element("div", "preview-count");
-  item.append(element("dt", "", label), element("dd", "", String(value || 0)));
-  return item;
-}
-
-function renderImportPreview(result) {
-  const counts = result.counts || {};
-  ui.previewCounts.replaceChildren(
-    previewCount("Thêm mới", counts.added),
-    previewCount("Cập nhật", counts.updated),
-    previewCount("Trùng", counts.duplicates),
-    previewCount("Lỗi", counts.errors),
-  );
-  const actionLabels = { add: "Thêm mới", update: "Cập nhật", duplicate: "Trùng" };
-  const changes = Array.isArray(result.changes) ? result.changes : [];
-  ui.previewChanges.replaceChildren(...changes.map((change) => {
-    const item = element("li", "preview-change");
-    item.append(
-      element("span", "preview-email", String(change.email || "Tài khoản")),
-      element("span", "preview-action", actionLabels[change.action] || "Không đổi"),
-    );
-    return item;
-  }));
-  if (!changes.length) {
-    ui.previewChanges.append(element("li", "preview-empty", "Không có thay đổi hợp lệ."));
-  }
-  ui.importPreview.hidden = false;
-  ui.importResult.textContent = counts.errors
-    ? `Có ${counts.errors} dòng lỗi. Kiểm tra lựa chọn trước khi xác nhận.`
-    : "Bản xem trước đã sẵn sàng. Chưa có dữ liệu nào được lưu.";
-  ui.importResult.className = counts.errors ? "import-result is-error" : "import-result";
-}
-
-async function previewImport() {
+async function checkAccountInput() {
   const requestedLines = ui.accountLines.value.trim();
+  const requestId = ++accountCheckRequestId;
+  accountCanBeAdded = false;
+  ui.importAccounts.disabled = true;
   if (!requestedLines) {
-    ui.importResult.textContent = "Hãy nhập ít nhất một tài khoản.";
-    ui.importResult.className = "import-result is-error";
+    ui.importResult.textContent = "";
+    ui.importResult.className = "import-result";
     return;
   }
-  invalidateImportPreview();
-  const requestId = previewRequestId;
-  ui.previewImport.disabled = true;
-  ui.previewImport.textContent = "Đang kiểm tra...";
+  ui.importResult.textContent = "Đang kiểm tra tài khoản...";
+  ui.importResult.className = "import-result";
   try {
-    const result = await api("/api/accounts/import/preview", {
+    const result = await api("/api/accounts/import/check", {
       method: "POST",
       body: JSON.stringify({ lines: requestedLines }),
     });
     if (
-      requestId !== previewRequestId
+      requestId !== accountCheckRequestId
       || ui.accountLines.value.trim() !== requestedLines
     ) {
       return;
     }
-    importPreviewToken = result.preview_token;
-    renderImportPreview(result);
-    ui.importAccounts.disabled = !importPreviewToken;
+    accountCanBeAdded = result.valid === true;
+    ui.importResult.textContent = result.message;
+    ui.importResult.className = result.valid
+      ? "import-result"
+      : "import-result is-error";
+    ui.importAccounts.disabled = !accountCanBeAdded;
   } catch (error) {
-    if (requestId !== previewRequestId) return;
+    if (requestId !== accountCheckRequestId) return;
     ui.importResult.textContent = error.message;
     ui.importResult.className = "import-result is-error";
-  } finally {
-    ui.previewImport.disabled = false;
-    ui.previewImport.textContent = "Xem trước";
   }
 }
 
 function closeImportDialog() {
-  invalidateImportPreview();
+  resetAccountCheck();
+  ui.accountLines.value = "";
   ui.accountDialog.close();
   ui.openImport.focus();
 }
 
 async function importAccounts() {
-  if (!importPreviewToken) {
-    ui.importResult.textContent = "Hãy tạo lại bản xem trước trước khi lưu.";
+  if (!accountCanBeAdded) {
+    ui.importResult.textContent = "Tài khoản chưa vượt qua kiểm tra trùng.";
     ui.importResult.className = "import-result is-error";
     return;
   }
 
+  const requestedLines = ui.accountLines.value.trim();
   ui.importAccounts.disabled = true;
   ui.importAccounts.textContent = "Đang lưu...";
   try {
     const result = await api("/api/accounts/import", {
       method: "POST",
-      body: JSON.stringify({
-        preview_token: importPreviewToken,
-        reject_on_errors: ui.rejectOnErrors.checked,
-      }),
+      body: JSON.stringify({ lines: requestedLines }),
     });
-    const summary = `Tổng ${result.total}; thêm ${result.added}; cập nhật ${result.updated}; trùng ${result.duplicates}.`;
-    ui.importResult.textContent = result.errors.length
-      ? `${summary} Có ${result.errors.length} dòng lỗi; nội dung nhạy cảm không được hiển thị.`
-      : summary;
-    ui.importResult.className = result.errors.length
-      ? "import-result is-error"
-      : "import-result";
-
+    const summary = `Đã thêm ${result.email}.`;
     await pollState();
-    consumeImportPreview();
-    if (!result.errors.length) {
-      ui.accountLines.value = "";
-      ui.accountDialog.close();
-      showToast(summary);
-    }
+    ui.accountLines.value = "";
+    resetAccountCheck();
+    ui.accountDialog.close();
+    showToast(summary);
   } catch (error) {
     ui.importResult.textContent = error.message;
     ui.importResult.className = "import-result is-error";
+    await checkAccountInput();
   } finally {
-    ui.importAccounts.disabled = false;
-    ui.importAccounts.textContent = "Xác nhận lưu";
-    ui.importAccounts.disabled = !importPreviewToken;
+    ui.importAccounts.textContent = "Thêm tài khoản";
+    ui.importAccounts.disabled = !accountCanBeAdded;
   }
 }
 
@@ -1010,8 +1399,12 @@ async function refreshAllAccounts() {
   try {
     const result = await api("/api/codex/refresh", {
       method: "POST",
-      body: JSON.stringify({ account_id: null }),
+      body: JSON.stringify({
+        account_id: null,
+        force_token_usage: true,
+      }),
     });
+    tokenRefreshPending = result.accepted;
     showToast(result.accepted ? "Đã bắt đầu đồng bộ." : "Một lượt đồng bộ đang chạy.");
     await pollState();
   } catch (error) {
@@ -1030,16 +1423,37 @@ document.querySelectorAll("[data-open-import]").forEach((node) => {
 });
 ui.closeImport.addEventListener("click", closeImportDialog);
 ui.cancelImport.addEventListener("click", closeImportDialog);
-ui.accountLines.addEventListener("input", invalidateImportPreview);
-ui.previewImport.addEventListener("click", previewImport);
+ui.accountLines.addEventListener("input", checkAccountInput);
 ui.importAccounts.addEventListener("click", importAccounts);
 ui.refreshAll.addEventListener("click", refreshAllAccounts);
 ui.shutdownApplication.addEventListener("click", shutdownApplication);
 ui.accountGrid.addEventListener("click", handleCardAction);
 ui.accountFilter.addEventListener("change", applyAccountFilters);
-ui.tabs.forEach((tab) => {
-  tab.addEventListener("click", () => activateTab(tab));
-  tab.addEventListener("keydown", handleTabKeydown);
+ui.tokenAccountSelect.addEventListener("change", () => {
+  renderTokenUsage();
+});
+ui.tokenHeatmap.addEventListener("pointerover", (event) => {
+  showHeatmapTooltip(event.target.closest(".heatmap-cell"));
+});
+ui.tokenHeatmap.addEventListener("pointerout", hideHeatmapTooltip);
+ui.tokenHeatmap.addEventListener("focusin", (event) => {
+  showHeatmapTooltip(event.target.closest(".heatmap-cell"));
+});
+ui.tokenHeatmap.addEventListener("focusout", hideHeatmapTooltip);
+ui.tokenRangeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    selectedTokenRange = button.dataset.tokenRange;
+    ui.tokenRangeButtons.forEach((candidate) => {
+      const selected = candidate === button;
+      candidate.classList.toggle("is-active", selected);
+      candidate.setAttribute("aria-pressed", String(selected));
+    });
+    renderTokenUsage();
+  });
+});
+ui.workspaceTabs.forEach((tab) => {
+  tab.addEventListener("click", () => activateTab(tab, ui.workspaceTabs));
+  tab.addEventListener("keydown", (event) => handleTabKeydown(event, ui.workspaceTabs));
 });
 
 if (accessToken) {

@@ -217,7 +217,8 @@ async function savePassword(): Promise<void> {
       />
     </div>
     <GlassDialog
-      :open="passwordAccount !== null"
+      v-if="passwordAccount !== null"
+      :open="true"
       title="Chỉnh sửa mật khẩu"
       @close="closePasswordEditor"
     >

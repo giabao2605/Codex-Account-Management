@@ -12,8 +12,7 @@ thay thế `web/` production:
 - polling `/api/state` mỗi 1 giây, không chồng request, giữ trạng thái offline và
   fail-closed khi sai schema;
 - lọc, đề xuất, copy email/OTP, copy password/secret theo hành động chủ động;
-- refresh toàn bộ hoặc từng tài khoản, login, unlink, reset profile, xóa tài
-  khoản và lưu trữ orphan profile;
+- refresh toàn bộ hoặc từng tài khoản, login, unlink và xóa tài khoản;
 - import theo quy trình preview token rồi apply; nội dung thay đổi làm vô hiệu
   preview đang có;
 - token usage schema 2, cache 5 phút, force refresh, trạng thái fresh/stale/

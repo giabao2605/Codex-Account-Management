@@ -2,7 +2,9 @@
 import { ref } from "vue";
 
 import GlassButton from "@/components/glass/GlassButton.vue";
+import GlassDialog from "@/components/glass/GlassDialog.vue";
 import GlassSelectPopover from "@/components/glass/GlassSelectPopover.vue";
+import SurfaceActionButton from "@/components/glass/SurfaceActionButton.vue";
 import { useAccountsStore, type AccountAction } from "@/stores/accounts.ts";
 import { useFeedbackStore } from "@/stores/feedback.ts";
 import { useSessionStore } from "@/stores/session.ts";
@@ -16,13 +18,14 @@ const accounts = useAccountsStore();
 const feedback = useFeedbackStore();
 const session = useSessionStore();
 const importOpen = ref(false);
-const archiveBusy = ref(false);
+const passwordAccount = ref<AccountState | null>(null);
+const updatedPassword = ref("");
+const passwordSaving = ref(false);
 const importMorphId = "import-account-dialog";
 const actionTypes: AccountAction[] = [
   "refresh",
   "login",
   "unlink",
-  "reset-profile",
   "delete",
   "password",
   "secret",
@@ -86,21 +89,21 @@ async function refresh(accountId: string | null): Promise<void> {
 
 async function lifecycle(
   account: AccountState,
-  action: "login" | "unlink" | "reset-profile",
+  action: "login" | "unlink",
 ): Promise<void> {
   if (
-    action !== "login"
-    && !window.confirm(`Xác nhận thao tác với ${account.email}?`)
+    action === "unlink"
+    && !window.confirm(
+      `Ngắt liên kết ${account.email}? Profile Codex local sẽ bị xóa vĩnh viễn.`,
+    )
   ) {
     return;
   }
   try {
     await accounts.lifecycle(account.id, action);
-    const message = {
-      login: "Đã mở quy trình đăng nhập.",
-      unlink: "Đã bỏ liên kết profile.",
-      "reset-profile": "Đã đặt lại profile.",
-    }[action];
+    const message = action === "login"
+      ? "Đã mở quy trình đăng nhập."
+      : "Đã bỏ liên kết và xóa profile Codex local.";
     feedback.success(message);
   } catch {
     feedback.error("Không thể cập nhật profile tài khoản.");
@@ -119,24 +122,35 @@ async function remove(account: AccountState): Promise<void> {
   }
 }
 
-async function archiveOrphans(): Promise<void> {
-  const count = session.state?.orphan_profile_count ?? 0;
-  if (
-    count === 0
-    || !window.confirm(`Lưu trữ ${count} profile mồ côi?`)
-  ) {
-    return;
-  }
-  archiveBusy.value = true;
+function openPasswordEditor(account: AccountState): void {
+  updatedPassword.value = "";
+  passwordAccount.value = account;
+}
+
+function closePasswordEditor(): void {
+  if (passwordSaving.value) return;
+  updatedPassword.value = "";
+  passwordAccount.value = null;
+}
+
+async function savePassword(): Promise<void> {
+  const account = passwordAccount.value;
+  const password = updatedPassword.value;
+  if (passwordSaving.value || !account || !password.trim()) return;
+
+  passwordSaving.value = true;
   try {
-    const result = await accounts.archiveOrphans();
-    feedback.success(`Đã lưu trữ ${result.archived} profile mồ côi.`);
+    await accounts.updatePassword(account.id, password);
+    feedback.success("Đã cập nhật mật khẩu đã lưu.");
+    updatedPassword.value = "";
+    passwordAccount.value = null;
   } catch {
-    feedback.error("Không thể lưu trữ profile mồ côi.");
+    feedback.error("Không thể cập nhật mật khẩu.");
   } finally {
-    archiveBusy.value = false;
+    passwordSaving.value = false;
   }
 }
+
 </script>
 
 <template>
@@ -198,21 +212,53 @@ async function archiveOrphans(): Promise<void> {
         @refresh="refresh(account.id)"
         @login="lifecycle(account, 'login')"
         @unlink="lifecycle(account, 'unlink')"
-        @reset-profile="lifecycle(account, 'reset-profile')"
+        @edit-password="openPasswordEditor(account)"
         @delete="remove(account)"
       />
     </div>
+    <GlassDialog
+      :open="passwordAccount !== null"
+      title="Chỉnh sửa mật khẩu"
+      @close="closePasswordEditor"
+    >
+      <label for="updated-password">
+        Mật khẩu mới cho {{ passwordAccount?.email }}
+      </label>
+      <input
+        id="updated-password"
+        v-model="updatedPassword"
+        name="updated-password"
+        type="password"
+        class="standard-control"
+        data-material="standard-control"
+        autocomplete="new-password"
+        maxlength="4096"
+        aria-describedby="password-update-note"
+        @keydown.enter="savePassword"
+      >
+      <p id="password-update-note">
+        Chỉ cập nhật mật khẩu lưu trong ứng dụng này; không đổi mật khẩu
+        OpenAI/ChatGPT và không cần liên kết lại Codex.
+      </p>
+      <template #actions>
+        <SurfaceActionButton
+          :disabled="passwordSaving"
+          @click="closePasswordEditor"
+        >
+          Hủy
+        </SurfaceActionButton>
+        <SurfaceActionButton
+          data-action="save-password"
+          :busy="passwordSaving"
+          :disabled="!updatedPassword.trim()"
+          @click="savePassword"
+        >
+          Lưu
+        </SurfaceActionButton>
+      </template>
+    </GlassDialog>
     <p v-if="!accounts.filteredAccounts.length" class="empty">
       Không có tài khoản phù hợp.
     </p>
-    <GlassButton
-      v-if="session.state?.orphan_profile_count"
-      variant="quiet"
-      data-action="archive-orphans"
-      :busy="archiveBusy"
-      @click="archiveOrphans"
-    >
-      Lưu trữ {{ session.state.orphan_profile_count }} profile mồ côi
-    </GlassButton>
   </section>
 </template>

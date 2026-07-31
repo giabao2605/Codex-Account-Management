@@ -6,6 +6,7 @@ import queue
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +30,162 @@ class CodexReloginRequired(CodexSessionError):
     """Profile không còn tài khoản OpenAI hợp lệ."""
 
 
+@dataclass(frozen=True)
+class CodexQuotaWindow:
+    limit_id: str | None
+    limit_name: str | None
+    kind: str
+    used_percent: float | None
+    window_duration_minutes: int | None
+    resets_at: int | None
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "limit_id": self.limit_id,
+            "limit_name": self.limit_name,
+            "resets_at": self.resets_at,
+            "used_percent": self.used_percent,
+            "window_duration_minutes": self.window_duration_minutes,
+        }
+
+
+@dataclass(frozen=True)
+class CodexQuotaSnapshot:
+    reached_type: str | None
+    exhausted: bool
+    windows: tuple[CodexQuotaWindow, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            "exhausted": self.exhausted,
+            "rate_limit_reached_type": self.reached_type,
+            "windows": [window.to_dict() for window in self.windows],
+        }
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0.0, min(100.0, float(value)))
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def normalize_quota_snapshot(payload: object) -> CodexQuotaSnapshot:
+    source = payload if isinstance(payload, dict) else {}
+    windows: list[CodexQuotaWindow] = []
+    reached_type = _optional_text(source.get("rateLimitReachedType"))
+    buckets = source.get("rateLimitsByLimitId")
+
+    if isinstance(buckets, dict):
+        for bucket_key, bucket in sorted(
+            buckets.items(),
+            key=lambda item: str(item[0]),
+        ):
+            if not isinstance(bucket, dict):
+                continue
+            if reached_type is None:
+                reached_type = _optional_text(
+                    bucket.get("rateLimitReachedType")
+                )
+            limit_id = _optional_text(bucket.get("limitId"))
+            if limit_id is None and isinstance(bucket_key, str):
+                limit_id = bucket_key
+            limit_name = _optional_text(bucket.get("limitName"))
+            for kind in ("primary", "secondary"):
+                window = bucket.get(kind)
+                if not isinstance(window, dict):
+                    continue
+                windows.append(
+                    CodexQuotaWindow(
+                        limit_id=limit_id,
+                        limit_name=limit_name,
+                        kind=kind,
+                        used_percent=_optional_float(
+                            window.get("usedPercent")
+                        ),
+                        window_duration_minutes=_optional_int(
+                            window.get("windowDurationMins")
+                        ),
+                        resets_at=_optional_int(window.get("resetsAt")),
+                    )
+                )
+
+    if not windows:
+        fallback = source.get("rateLimits")
+        if isinstance(fallback, dict):
+            if reached_type is None:
+                reached_type = _optional_text(
+                    fallback.get("rateLimitReachedType")
+                )
+            for kind in ("primary", "secondary"):
+                window = fallback.get(kind)
+                if not isinstance(window, dict):
+                    continue
+                windows.append(
+                    CodexQuotaWindow(
+                        limit_id=None,
+                        limit_name=None,
+                        kind=kind,
+                        used_percent=_optional_float(
+                            window.get("usedPercent")
+                        ),
+                        window_duration_minutes=_optional_int(
+                            window.get("windowDurationMins")
+                        ),
+                        resets_at=_optional_int(window.get("resetsAt")),
+                    )
+                )
+
+    exhausted = bool(reached_type) or (
+        bool(windows)
+        and all(
+            window.used_percent is not None
+            and window.used_percent >= 100
+            for window in windows
+        )
+    )
+    return CodexQuotaSnapshot(
+        reached_type=reached_type,
+        exhausted=exhausted,
+        windows=tuple(windows),
+    )
+
+
+def extract_usage_limit_event(payload: object) -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+    thread_id = payload.get("threadId")
+    turn = payload.get("turn")
+    if not isinstance(thread_id, str) or not isinstance(turn, dict):
+        return None
+    turn_id = turn.get("id")
+    error = turn.get("error")
+    if (
+        not isinstance(turn_id, str)
+        or not isinstance(error, dict)
+        or error.get("codexErrorInfo") != "usageLimitExceeded"
+    ):
+        return None
+    return {
+        "error_kind": "usageLimitExceeded",
+        "thread_id": thread_id,
+        "turn_id": turn_id,
+    }
+
+
 def merge_sparse_dict(current: dict, update: dict) -> dict:
     """
     Gộp notification dạng sparse mà không sửa object đầu vào.
@@ -49,6 +206,26 @@ def merge_sparse_dict(current: dict, update: dict) -> dict:
         else:
             merged[key] = copy.deepcopy(value)
 
+    return merged
+
+
+def _merge_rate_limit_update(current: dict, update: dict) -> dict:
+    merged = merge_sparse_dict(current, update)
+
+    def apply_authoritative_nulls(
+        destination: dict,
+        source: dict,
+    ) -> None:
+        if "rateLimitReachedType" in source:
+            destination["rateLimitReachedType"] = copy.deepcopy(
+                source["rateLimitReachedType"]
+            )
+        for key, value in source.items():
+            nested = destination.get(key)
+            if isinstance(value, dict) and isinstance(nested, dict):
+                apply_authoritative_nulls(nested, value)
+
+    apply_authoritative_nulls(merged, update)
     return merged
 
 
@@ -90,6 +267,7 @@ class CodexProfileSession:
         self._closed = False
         self._cached_account: dict | None = None
         self._cached_limits: dict | None = None
+        self._cached_quota = CodexQuotaSnapshot(None, False, ())
 
     @property
     def process_id(self) -> int | None:
@@ -126,10 +304,12 @@ class CodexProfileSession:
                 with self._cache_lock:
                     self._cached_account = copy.deepcopy(account)
                     self._cached_limits = copy.deepcopy(limits)
+                    self._cached_quota = normalize_quota_snapshot(limits)
 
                 return {
                     "account": account,
                     "limits": limits,
+                    "quota": self._cached_quota.to_dict(),
                 }
 
             except CodexReloginRequired:
@@ -151,15 +331,26 @@ class CodexProfileSession:
         """Đọc thống kê token từ app-server trên phiên đang chạy."""
         return self._request("account/usage/read")
 
+    def request(
+        self,
+        method: str,
+        params: dict | None = None,
+    ) -> dict:
+        """Gửi một request app-server đã được khởi tạo."""
+        return self._request(method, params)
+
     def restart(self) -> None:
         """Dừng process hiện tại; request kế tiếp sẽ mở lại."""
         with self._lifecycle_lock:
-            self._stop_process()
+            if not self._stop_process():
+                raise CodexSessionError(
+                    "Không thể dừng Codex App Server."
+                )
 
-    def close(self) -> None:
+    def close(self) -> bool:
         with self._lifecycle_lock:
             self._closed = True
-            self._stop_process()
+            return self._stop_process()
 
     def _ensure_started(self) -> None:
         with self._lifecycle_lock:
@@ -446,15 +637,30 @@ class CodexProfileSession:
         if method == "account/rateLimits/updated":
             with self._cache_lock:
                 current = self._cached_limits or {}
-                self._cached_limits = merge_sparse_dict(current, payload)
+                self._cached_limits = _merge_rate_limit_update(
+                    current,
+                    payload,
+                )
+                self._cached_quota = normalize_quota_snapshot(
+                    self._cached_limits
+                )
                 account = copy.deepcopy(self._cached_account)
                 limits = copy.deepcopy(self._cached_limits)
+                quota = self._cached_quota.to_dict()
 
             if account is not None:
                 self._emit(
                     "rate_limits_updated",
                     {"account": account, "limits": limits},
                 )
+            self._emit("quota_updated", {"quota": quota})
+            return
+
+        if method == "turn/completed":
+            usage_limit = extract_usage_limit_event(payload)
+            if usage_limit is not None:
+                self._emit("usage_limit_exceeded", usage_limit)
+            self._emit("turn_completed", payload)
 
     def _emit(self, event: str, payload: dict) -> None:
         handler = self.notification_handler
@@ -484,13 +690,19 @@ class CodexProfileSession:
 
             response_queue.put_nowait(error)
 
-    def _stop_process(self) -> None:
+    def _stop_process(self) -> bool:
         process = self._process
         generation = self._process_generation
         self._process = None
 
         if process is None:
-            return
+            return True
+
+        def process_exited() -> bool:
+            try:
+                return process.poll() is not None
+            except Exception:
+                return False
 
         # Vô hiệu hóa ngay mọi message đến muộn từ reader của process cũ.
         self._process_generation += 1
@@ -506,16 +718,23 @@ class CodexProfileSession:
         except Exception:
             pass
 
-        if process.poll() is None:
+        if not process_exited():
             try:
                 process.terminate()
                 process.wait(timeout=3)
             except Exception:
-                try:
-                    process.kill()
-                    process.wait(timeout=3)
-                except Exception:
-                    pass
+                pass
+
+        if not process_exited():
+            try:
+                process.kill()
+                process.wait(timeout=3)
+            except Exception:
+                pass
+
+        if not process_exited():
+            self._process = process
+            return False
 
         for stream in (
             process.stdout,
@@ -526,3 +745,5 @@ class CodexProfileSession:
                     stream.close()
             except Exception:
                 pass
+
+        return True

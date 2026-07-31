@@ -160,6 +160,39 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
   expect(await seriousAxeViolations(page)).toEqual([]);
 });
 
+test("uses reclaimed header space for account status details", async ({
+  page,
+}) => {
+  await page.goto(`/#${accessToken}`);
+  const card = page.locator(".account-card").first();
+  await expect(card).toBeVisible();
+
+  const layout = await card.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>(".account-card-header");
+    const meters = element.querySelector<HTMLElement>(".account-meter-grid");
+    const details = element.querySelectorAll<HTMLElement>(
+      ".account-sync-details > div",
+    );
+    if (!header || !meters || details.length !== 3) return null;
+    const headerContentBottom = Math.max(
+      ...[...header.children].map(
+        (child) => child.getBoundingClientRect().bottom,
+      ),
+    );
+    return {
+      headerGap: meters.getBoundingClientRect().top - headerContentBottom,
+      detailHeights: [...details].map(
+        (detail) => detail.getBoundingClientRect().height,
+      ),
+    };
+  });
+
+  expect(layout).not.toBeNull();
+  expect(layout!.headerGap).toBeGreaterThanOrEqual(0);
+  expect(layout!.headerGap).toBeLessThanOrEqual(11);
+  expect(Math.min(...layout!.detailHeights)).toBeGreaterThanOrEqual(68);
+});
+
 test("effects off keeps every active glass interaction surface opaque", async ({
   page,
 }) => {

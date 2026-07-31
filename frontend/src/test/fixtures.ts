@@ -14,6 +14,18 @@ export function applicationState(): ApplicationState {
         quota_remaining: "82%",
         quota_cycle: "5 giờ",
         quota_reset_at: "23/07 14:00",
+        quota_windows: [
+          {
+            quota_remaining: "82%",
+            quota_cycle: "5 giờ",
+            quota_reset_at: "23/07 14:00",
+          },
+          {
+            quota_remaining: "64%",
+            quota_cycle: "Weekly",
+            quota_reset_at: "28/07 09:00",
+          },
+        ],
         plan_type: "Plus",
         account_state: "Hoạt động bình thường",
         sync_status: "Đã đồng bộ",
@@ -27,6 +39,7 @@ export function applicationState(): ApplicationState {
         quota_remaining: "Chưa rõ",
         quota_cycle: "Chưa rõ",
         quota_reset_at: "Chưa rõ",
+        quota_windows: [],
         plan_type: "Chưa rõ",
         account_state: "Chưa xác định",
         sync_status: "Chưa liên kết",
@@ -35,7 +48,6 @@ export function applicationState(): ApplicationState {
     ],
     sync_status: "1 thành công, 0 cần đăng nhập, 1 chưa liên kết, 0 lỗi tạm thời",
     refresh_interval_seconds: 60,
-    orphan_profile_count: 1,
     recommendation: {
       account_id: "1111111111111111",
       email: "alpha@example.test",

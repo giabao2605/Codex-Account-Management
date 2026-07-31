@@ -24,7 +24,13 @@ accounts.tmp
 .accounts.json.*.tmp
 codex_profiles/
 .web_session.json
+.web_session.json.tmp
 ..web_session.json.tmp
+auth.json
+*.pem
+*.key
+*.p12
+*.pfx
 *.log
 
 # Editors and operating system

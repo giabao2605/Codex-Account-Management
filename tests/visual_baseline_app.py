@@ -100,6 +100,18 @@ _ACCOUNT_ROWS = [
         "quota_remaining": "82%",
         "quota_cycle": "5 giờ",
         "quota_reset_at": "23/07 14:00",
+        "quota_windows": [
+            {
+                "quota_remaining": "82%",
+                "quota_cycle": "5 giờ",
+                "quota_reset_at": "23/07 14:00",
+            },
+            {
+                "quota_remaining": "64%",
+                "quota_cycle": "Weekly",
+                "quota_reset_at": "28/07 09:00",
+            },
+        ],
         "plan_type": "Plus",
         "account_state": "Hoạt động bình thường",
         "sync_status": "Đã đồng bộ",
@@ -113,6 +125,18 @@ _ACCOUNT_ROWS = [
         "quota_remaining": "12%",
         "quota_cycle": "5 giờ",
         "quota_reset_at": "23/07 12:30",
+        "quota_windows": [
+            {
+                "quota_remaining": "12%",
+                "quota_cycle": "5 giờ",
+                "quota_reset_at": "23/07 12:30",
+            },
+            {
+                "quota_remaining": "48%",
+                "quota_cycle": "Weekly",
+                "quota_reset_at": "28/07 09:00",
+            },
+        ],
         "plan_type": "Plus",
         "account_state": "Hoạt động bình thường",
         "sync_status": "Dữ liệu token đã cũ",
@@ -126,6 +150,7 @@ _ACCOUNT_ROWS = [
         "quota_remaining": "Chưa rõ",
         "quota_cycle": "Chưa rõ",
         "quota_reset_at": "Chưa rõ",
+        "quota_windows": [],
         "plan_type": "Chưa rõ",
         "account_state": "Chưa xác định",
         "sync_status": "Chưa liên kết",
@@ -246,7 +271,6 @@ class VisualBaselineService:
             "accounts": _ACCOUNT_ROWS,
             "sync_status": "Đã đồng bộ 2/3 tài khoản",
             "refresh_interval_seconds": 30,
-            "orphan_profile_count": 1,
             "recommendation": {
                 "account_id": _ACCOUNT_ROWS[0]["id"],
                 "email": _ACCOUNT_ROWS[0]["email"],
@@ -361,14 +385,8 @@ class VisualBaselineService:
     def unlink_profile(self, account_id: str) -> None:
         del account_id
 
-    def reset_profile(self, account_id: str) -> None:
-        del account_id
-
     def delete_account(self, account_id: str) -> None:
         del account_id
-
-    def archive_orphan_profiles(self) -> int:
-        return 1
 
     def sensitive_value(
         self,
@@ -377,6 +395,9 @@ class VisualBaselineService:
     ) -> str:
         del account_id, field
         return "fixture-only-value"
+
+    def update_password(self, account_id: str, password: str) -> None:
+        del account_id, password
 
     def check_account(self, lines: str) -> dict[str, object]:
         stripped = lines.strip()

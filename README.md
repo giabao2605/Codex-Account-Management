@@ -18,7 +18,7 @@
 - Sao chép email, mật khẩu hoặc secret theo thao tác chủ động.
 - Thêm từng tài khoản với kiểm tra trùng email và secret ngay khi nhập.
 - Liên kết lại tài khoản Codex khi phiên đăng nhập hết hiệu lực.
-- Ngắt liên kết, tạo lại hồ sơ sạch và lưu trữ hồ sơ không còn gắn với tài khoản.
+- Ngắt liên kết Codex và xóa vĩnh viễn profile local khi cần.
 - Thoát ứng dụng an toàn ngay trên giao diện.
 - Chuyển đổi giữa giao diện sáng và tối, tự ghi nhớ lựa chọn trên trình duyệt.
 
@@ -55,14 +55,19 @@ Kết quả khôi phục parity, baseline PC và acceptance gate hiện hành n�
 
 - Windows 10 hoặc Windows 11.
 - Python 3.11 trở lên.
-- Các thư viện Python của dự án, bao gồm FastAPI, Uvicorn, PyOTP và pywin32.
+- Git.
+- Codex CLI trong `PATH` để sử dụng liên kết tài khoản, quota và thống kê token.
 
-## Chạy ứng dụng
+## Cài đặt và chạy
 
-Tại thư mục dự án:
+Mở PowerShell và chạy:
 
 ```powershell
-python run_local_web.py
+git clone https://github.com/giabao2605/Codex-Account-Management.git
+Set-Location .\Codex-Account-Management
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install fastapi uvicorn pyotp pywin32
+.\.venv\Scripts\python.exe run_local_web.py
 ```
 
 Ứng dụng sẽ mở trình duyệt tại `http://127.0.0.1:8765` sau khi dịch vụ sẵn sàng. Nếu ứng dụng đã chạy, launcher sẽ mở lại trang đang hoạt động thay vì tạo thêm dịch vụ trên cùng cổng.
@@ -70,9 +75,15 @@ python run_local_web.py
 Launcher phục vụ Vue Liquid Glass từ `web-dist/`. Không cần chạy
 Vite dev server hoặc mở thêm cổng khi sử dụng hằng ngày.
 
+Lần đầu sử dụng, thêm tài khoản của chính bạn trong giao diện. Không sao chép
+`accounts.json`, `.web_session.json` hoặc `codex_profiles/` từ máy khác:
+những dữ liệu này chứa thông tin riêng tư và được bảo vệ theo tài khoản Windows
+đã tạo ra chúng.
+
 ## Build lại frontend production
 
-Sau khi thay đổi source trong `frontend/`, chạy:
+Chỉ cần Node.js 22 trở lên nếu muốn sửa và build lại frontend. Sau khi thay đổi
+source trong `frontend/`, chạy:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_frontend.ps1
@@ -93,10 +104,7 @@ Mỗi lần chỉ thêm một tài khoản mới. Email đã tồn tại không 
 
 ## Quản lý hồ sơ Codex
 
-Các thao tác ngắt liên kết và tạo lại hồ sơ đều yêu cầu xác nhận. Hồ sơ cũ được chuyển vào `codex_profiles/.archived/` thay vì xóa vĩnh viễn, nên có thể khôi phục thủ công khi cần.
-
-- `Ngắt liên kết` lưu trữ profile đăng nhập hiện tại nhưng giữ tài khoản trong danh sách. Lần sau cần liên kết Codex lại.
-- `Đặt lại profile` lưu trữ toàn bộ profile hiện tại rồi tạo một profile trống, dùng khi profile bị lỗi hoặc cần đăng nhập lại từ đầu.
+`Ngắt liên kết` yêu cầu xác nhận, xóa vĩnh viễn profile Codex local nhưng vẫn giữ tài khoản trong danh sách. Lần sau cần liên kết Codex lại.
 
 ## Đồng bộ giờ OTP
 
@@ -143,12 +151,13 @@ Tùy chọn `-B` ngăn Python tạo thư mục `__pycache__` trong lúc kiểm t
 ## Dữ liệu và bảo mật
 
 - Không commit `accounts.json`, `.web_session.json` hoặc `codex_profiles/`.
+- Không commit `auth.json`, `.env`, khóa riêng, log, cache, coverage hoặc `node_modules/`.
 - Không đọc, in hoặc chia sẻ file `auth.json` bên trong hồ sơ Codex.
 - Chỉ các yêu cầu từ loopback hợp lệ mới được dịch vụ chấp nhận.
 - Các thao tác thay đổi dữ liệu được bảo vệ bằng session token và CSRF token.
 - Mật khẩu và secret chỉ được trả về khi người dùng chủ động yêu cầu sao chép.
 - Kết quả kiểm tra tài khoản không trả lại mật khẩu hoặc secret.
-- Thao tác vòng đời hồ sơ chỉ lưu trữ hồ sơ trong phạm vi `codex_profiles/`, không xóa vĩnh viễn.
+- Thao tác ngắt liên kết chỉ được xóa profile trực tiếp trong `codex_profiles/` sau khi kiểm tra đường dẫn an toàn.
 
 ## Dừng ứng dụng
 

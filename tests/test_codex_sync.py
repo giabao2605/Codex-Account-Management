@@ -12,9 +12,11 @@ from unittest import mock
 from app.codex_sync import (
     CodexProfileSession,
     CodexProtocolError,
+    CodexQuotaSnapshot,
     CodexReloginRequired,
     CodexSessionError,
     merge_sparse_dict,
+    normalize_quota_snapshot,
 )
 from app.otp_codex_manager_with_account_status import (
     CodexInfo,
@@ -427,6 +429,44 @@ class ErrorClassificationTests(unittest.TestCase):
 
 
 class SparseMergeTests(unittest.TestCase):
+    def test_normalizes_structured_quota_and_reached_type(self) -> None:
+        snapshot = normalize_quota_snapshot(
+            {
+                "rateLimitsByLimitId": {
+                    "codex": {
+                        "limitId": "codex",
+                        "limitName": "Codex",
+                        "rateLimitReachedType": "weekly",
+                        "primary": {
+                            "usedPercent": 87,
+                            "windowDurationMins": 300,
+                            "resetsAt": 123456,
+                        },
+                    }
+                },
+            }
+        )
+
+        self.assertIsInstance(snapshot, CodexQuotaSnapshot)
+        self.assertEqual(snapshot.reached_type, "weekly")
+        self.assertTrue(snapshot.exhausted)
+        self.assertEqual(len(snapshot.windows), 1)
+        self.assertEqual(snapshot.windows[0].limit_id, "codex")
+        self.assertEqual(snapshot.windows[0].kind, "primary")
+        self.assertEqual(snapshot.windows[0].used_percent, 87.0)
+
+    def test_quota_is_not_exhausted_when_any_window_remains(self) -> None:
+        snapshot = normalize_quota_snapshot(
+            {
+                "rateLimits": {
+                    "primary": {"usedPercent": 100},
+                    "secondary": {"usedPercent": 35},
+                }
+            }
+        )
+
+        self.assertFalse(snapshot.exhausted)
+
     def test_sparse_notification_does_not_erase_existing_values(self) -> None:
         current = {
             "rateLimits": {
@@ -457,6 +497,210 @@ class SparseMergeTests(unittest.TestCase):
 
 
 class PersistentSessionTests(unittest.TestCase):
+    def test_emits_structured_quota_update(self) -> None:
+        notifications: list[tuple[str, dict]] = []
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+            notification_handler=lambda event, payload: notifications.append(
+                (event, payload)
+            ),
+        )
+        session._cached_account = {
+            "account": {
+                "email": "user@example.com",
+                "planType": "plus",
+            }
+        }
+
+        session._handle_message(
+            {
+                "method": "account/rateLimits/updated",
+                "params": {
+                    "rateLimits": {
+                        "rateLimitReachedType": "weekly",
+                        "primary": {"usedPercent": 100},
+                    },
+                },
+            }
+        )
+
+        quota_payloads = [
+            payload
+            for event, payload in notifications
+            if event == "quota_updated"
+        ]
+        self.assertEqual(len(quota_payloads), 1)
+        self.assertEqual(
+            quota_payloads[0],
+            {
+                "quota": {
+                    "exhausted": True,
+                    "rate_limit_reached_type": "weekly",
+                    "windows": [
+                        {
+                            "kind": "primary",
+                            "limit_id": None,
+                            "limit_name": None,
+                            "resets_at": None,
+                            "used_percent": 100.0,
+                            "window_duration_minutes": None,
+                        }
+                    ],
+                }
+            },
+        )
+
+    def test_explicit_null_clears_reached_type_after_quota_reset(self) -> None:
+        notifications: list[tuple[str, dict]] = []
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+            notification_handler=lambda event, payload: notifications.append(
+                (event, payload)
+            ),
+        )
+        session._cached_limits = {
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "rateLimitReachedType": "weekly",
+                    "primary": {"usedPercent": 100},
+                }
+            }
+        }
+
+        session._handle_message(
+            {
+                "method": "account/rateLimits/updated",
+                "params": {
+                    "rateLimitsByLimitId": {
+                        "codex": {
+                            "rateLimitReachedType": None,
+                            "primary": {"usedPercent": 20},
+                        }
+                    }
+                },
+            }
+        )
+
+        quota = [
+            payload["quota"]
+            for event, payload in notifications
+            if event == "quota_updated"
+        ][-1]
+        self.assertIsNone(quota["rate_limit_reached_type"])
+        self.assertFalse(quota["exhausted"])
+
+    def test_emits_sanitized_usage_limit_event(self) -> None:
+        notifications: list[tuple[str, dict]] = []
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+            notification_handler=lambda event, payload: notifications.append(
+                (event, payload)
+            ),
+        )
+
+        session._handle_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-phase1",
+                    "turn": {
+                        "id": "turn-phase1",
+                        "status": "failed",
+                        "error": {
+                            "codexErrorInfo": "usageLimitExceeded",
+                            "message": "SENTINEL_PRIVATE_MESSAGE",
+                        },
+                    },
+                },
+            }
+        )
+
+        usage_payloads = [
+            payload
+            for event, payload in notifications
+            if event == "usage_limit_exceeded"
+        ]
+        self.assertEqual(
+            usage_payloads,
+            [
+                {
+                    "error_kind": "usageLimitExceeded",
+                    "thread_id": "thread-phase1",
+                    "turn_id": "turn-phase1",
+                }
+            ],
+        )
+        self.assertNotIn("SENTINEL", str(usage_payloads))
+
+    def test_public_request_supports_thread_protocol(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[
+                sys.executable,
+                "-u",
+                "-c",
+                FAKE_APP_SERVER,
+            ],
+            environment=os.environ.copy(),
+        )
+        try:
+            result = session.request("account/read", {"refreshToken": False})
+        finally:
+            session.close()
+
+        self.assertEqual(
+            result["account"]["email"],
+            "user@example.com",
+        )
+
+    def test_forwards_turn_completed_notification(self) -> None:
+        notifications: list[tuple[str, dict]] = []
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+            notification_handler=lambda event, payload: notifications.append(
+                (event, payload)
+            ),
+        )
+
+        session._handle_message(
+            {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-phase0",
+                    "turn": {
+                        "id": "turn-phase0",
+                        "items": [],
+                        "status": "completed",
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            notifications,
+            [
+                (
+                    "turn_completed",
+                    {
+                        "threadId": "thread-phase0",
+                        "turn": {
+                            "id": "turn-phase0",
+                            "items": [],
+                            "status": "completed",
+                        },
+                    },
+                )
+            ],
+        )
+
     def test_reuses_one_app_server_process_for_multiple_queries(self) -> None:
         events: list[tuple[str, dict]] = []
         session = CodexProfileSession(
@@ -633,6 +877,36 @@ class PersistentSessionTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 1)
         self.assertTrue(errors)
         self.assertIsInstance(errors[0], CodexSessionError)
+
+    def test_close_reports_failure_and_keeps_surviving_process(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+        )
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.terminate.side_effect = OSError("access denied")
+        process.kill.side_effect = OSError("access denied")
+        session._process = process
+
+        self.assertFalse(session.close())
+        self.assertIs(session._process, process)
+
+    def test_close_handles_poll_error_and_keeps_process_tracked(self) -> None:
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+        )
+        process = mock.Mock()
+        process.poll.side_effect = OSError("access denied")
+        process.terminate.side_effect = OSError("access denied")
+        process.kill.side_effect = OSError("access denied")
+        session._process = process
+
+        self.assertFalse(session.close())
+        self.assertIs(session._process, process)
 
     def test_timeout_does_not_expose_app_server_stderr(self) -> None:
         session = CodexProfileSession(

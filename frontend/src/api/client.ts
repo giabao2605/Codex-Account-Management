@@ -3,14 +3,14 @@ import type {
   ActionResponse,
   AddAccountResponse,
   ApplicationState,
-  ArchiveProfilesResponse,
   BootstrapResponse,
   DeleteResponse,
+  PasswordUpdateResponse,
   SensitiveValueResponse,
   TokenUsageResponse,
 } from "@/types/api.ts";
 
-export const EXPECTED_API_SCHEMA_VERSION = 6;
+export const EXPECTED_API_SCHEMA_VERSION = 10;
 
 export class ApiError extends Error {
   constructor(
@@ -70,6 +70,19 @@ export class LocalApiClient {
     );
   }
 
+  async updatePassword(
+    accountId: string,
+    password: string,
+  ): Promise<PasswordUpdateResponse> {
+    return this.request<PasswordUpdateResponse>(
+      `/api/accounts/${encodeURIComponent(accountId)}/password`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ password }),
+      },
+    );
+  }
+
   async refresh(accountId: string | null): Promise<ActionResponse> {
     return this.request<ActionResponse>("/api/codex/refresh", {
       method: "POST",
@@ -88,21 +101,10 @@ export class LocalApiClient {
     return this.accountAction(accountId, "unlink");
   }
 
-  async resetProfile(accountId: string): Promise<ActionResponse> {
-    return this.accountAction(accountId, "reset-profile");
-  }
-
   async deleteAccount(accountId: string): Promise<DeleteResponse> {
     return this.request<DeleteResponse>(
       `/api/accounts/${encodeURIComponent(accountId)}`,
       { method: "DELETE" },
-    );
-  }
-
-  async archiveOrphans(): Promise<ArchiveProfilesResponse> {
-    return this.request<ArchiveProfilesResponse>(
-      "/api/profiles/orphans/archive",
-      { method: "POST" },
     );
   }
 
@@ -114,7 +116,7 @@ export class LocalApiClient {
 
   private async accountAction(
     accountId: string,
-    action: "login" | "unlink" | "reset-profile",
+    action: "login" | "unlink",
   ): Promise<ActionResponse> {
     return this.request<ActionResponse>(
       `/api/codex/${encodeURIComponent(accountId)}/${action}`,

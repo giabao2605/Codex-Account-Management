@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./session.ts";
 import { applicationState } from "@/test/fixtures.ts";
 
-function bootstrapResponse(apiSchemaVersion = 6): Response {
+function bootstrapResponse(apiSchemaVersion = 10): Response {
   return new Response(
     JSON.stringify({
       api_schema_version: apiSchemaVersion,
@@ -39,7 +39,7 @@ describe("session store", () => {
     vi.unstubAllGlobals();
   });
 
-  it("accepts schema 6 and keeps CSRF in store memory", async () => {
+  it("accepts schema 10 and keeps CSRF in store memory", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(bootstrapResponse()));
     const store = useSessionStore();
 

@@ -15,12 +15,12 @@ from fastapi.testclient import TestClient
 from app.build_info import API_SCHEMA_VERSION, APP_BUILD_ID, BUILD_INPUTS
 from app.local_web_accounts import AccountConflictError
 from app.local_web_app import STATIC_ASSETS_DIR, create_app
-from app.local_web_profiles import (
-    UnsafeProfilePathError,
-    archive_profile_directory,
-)
+from app.local_web_profiles import UnsafeProfilePathError
 from app.local_web_service import LocalWebService, account_display_sort_key
-from app.otp_codex_manager_with_account_status import CodexInfo
+from app.otp_codex_manager_with_account_status import (
+    CodexInfo,
+    format_reset_time,
+)
 from app.token_usage import TokenUsageCacheEntry, normalize_token_usage
 from run_local_web import (
     existing_app_is_running,
@@ -136,6 +136,72 @@ class LocalWebApiTests(unittest.TestCase):
     def test_runtime_token_module_participates_in_build_id(self) -> None:
         self.assertIn("app/token_usage.py", BUILD_INPUTS)
 
+    def test_state_exposes_five_hour_and_weekly_quota_windows(
+        self,
+    ) -> None:
+        self.add_service_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        self.service._apply_codex_result(
+            "user@example.com",
+            {
+                "account": {
+                    "account": {
+                        "email": "user@example.com",
+                        "planType": "plus",
+                    }
+                },
+                "limits": {
+                    "rateLimits": {
+                        "primary": {
+                            "usedPercent": 99,
+                            "windowDurationMins": 60,
+                            "resetsAt": 1_893_456_000,
+                        },
+                        "secondary": {
+                            "usedPercent": 98,
+                            "windowDurationMins": 120,
+                            "resetsAt": 1_893_456_000,
+                        },
+                    },
+                    "rateLimitsByLimitId": {
+                        "codex": {
+                            "limitId": "codex",
+                            "primary": {
+                                "usedPercent": 25,
+                                "windowDurationMins": 300,
+                                "resetsAt": 1_893_456_000,
+                            },
+                            "secondary": {
+                                "usedPercent": 40,
+                                "windowDurationMins": 10_080,
+                                "resetsAt": 1_893_974_400,
+                            },
+                        }
+                    }
+                },
+            },
+        )
+
+        account = self.client.get("/api/state").json()["accounts"][0]
+
+        self.assertEqual(
+            account["quota_windows"],
+            [
+                {
+                    "quota_remaining": "75%",
+                    "quota_cycle": "5 giờ",
+                    "quota_reset_at": format_reset_time(1_893_456_000),
+                },
+                {
+                    "quota_remaining": "60%",
+                    "quota_cycle": "Weekly",
+                    "quota_reset_at": format_reset_time(1_893_974_400),
+                },
+            ],
+        )
+        self.assertEqual(account["quota_cycle"], "Weekly")
+
     def test_liquid_glass_phase1_parity_document_covers_baseline(
         self,
     ) -> None:
@@ -148,7 +214,7 @@ class LocalWebApiTests(unittest.TestCase):
         content = baseline_path.read_text(encoding="utf-8")
 
         for expected in (
-            "API_SCHEMA_VERSION = 5",
+            "API_SCHEMA_VERSION = 10",
             "TokenUsageResponse.schema_version = 2",
             "/api/usage/tokens",
             "Authorization: Bearer <session token>",
@@ -297,13 +363,14 @@ class LocalWebApiTests(unittest.TestCase):
 
         self.assertIn("Thêm tài khoản", script)
         self.assertIn("Ngắt liên kết", script)
-        self.assertIn("Đặt lại profile", script)
+        self.assertNotIn("Đặt lại profile", script)
+        self.assertNotIn("/reset-profile", script)
         self.assertIn("Tổng tài khoản", script)
         self.assertIn("thành công", script)
         self.assertIn("/api/accounts/import/check", script)
         self.assertIn("/api/accounts/import", script)
         self.assertIn("/api/codex/", script)
-        self.assertIn("/api/profiles/orphans/archive", script)
+        self.assertNotIn("/api/profiles/orphans/archive", script)
         self.assertIn("/api/application/shutdown", script)
         self.assertGreaterEqual(script.count("confirm("), 2)
 
@@ -333,8 +400,8 @@ class LocalWebApiTests(unittest.TestCase):
         script = self.production_asset_text(".js")
 
         self.assertIn("Ngắt liên kết", script)
-        self.assertIn("Đặt lại profile", script)
-        self.assertIn("profile mồ côi", script)
+        self.assertNotIn("Đặt lại profile", script)
+        self.assertNotIn("profile mồ côi", script)
 
     def test_rejects_non_loopback_client(self) -> None:
         remote_client = TestClient(
@@ -511,8 +578,6 @@ class LocalWebApiTests(unittest.TestCase):
         account_id = "0" * 16
         paths = (
             f"/api/codex/{account_id}/unlink",
-            f"/api/codex/{account_id}/reset-profile",
-            "/api/profiles/orphans/archive",
             "/api/application/shutdown",
         )
         unauthenticated_client = TestClient(
@@ -618,7 +683,9 @@ class LocalWebApiTests(unittest.TestCase):
         finally:
             shutdown_client.close()
 
-    def test_profile_lifecycle_archives_without_reading_auth_file(self) -> None:
+    def test_unlink_permanently_deletes_profile_without_reading_auth(
+        self,
+    ) -> None:
         self.service.import_accounts(
             "user@example.com|password|JBSWY3DPEHPK3PXP"
         )
@@ -643,57 +710,213 @@ class LocalWebApiTests(unittest.TestCase):
             )
         self.assertEqual(unlink.status_code, 200, unlink.text)
         self.assertFalse(profile_dir.exists())
-
-        profile_dir.mkdir(parents=True)
-        (profile_dir / "auth.json").write_text(
-            "reset-auth-content",
-            encoding="utf-8",
+        self.assertFalse((self.service.profiles_dir / ".archived").exists())
+        state = self.service.state()
+        self.assertEqual(len(state["accounts"]), 1)
+        self.assertEqual(
+            state["accounts"][0]["sync_status"],
+            "Chưa liên kết",
         )
-        with patch.object(Path, "open", reject_auth_reads):
-            reset = self.client.post(
-                f"/api/codex/{account_id}/reset-profile",
+
+    def test_unlink_does_not_reactivate_profile_when_cleanup_fails(
+        self,
+    ) -> None:
+        self.service.import_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        account_id = self.service.account_id("user@example.com")
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        with self.service._lock:
+            self.service._codex_info["user@example.com"] = CodexInfo(
+                stored_email="user@example.com",
+                status="Đã đồng bộ",
+            )
+
+        with patch(
+            "app.local_web_service.delete_profile_directory",
+            side_effect=OSError("locked staged file"),
+        ):
+            response = self.client.post(
+                f"/api/codex/{account_id}/unlink",
                 headers=self.headers,
             )
-        self.assertEqual(reset.status_code, 200, reset.text)
-        self.assertTrue(profile_dir.is_dir())
-        self.assertFalse((profile_dir / "auth.json").exists())
 
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(profile_dir.exists())
+        self.assertEqual(
+            self.service.state()["accounts"][0]["sync_status"],
+            "Chưa liên kết",
+        )
+
+        retry = self.client.post(
+            f"/api/codex/{account_id}/unlink",
+            headers=self.headers,
+        )
+
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(
+            list(
+                self.service.profiles_dir.glob(
+                    f".{profile_dir.name}.deleting-*"
+                )
+            ),
+            [],
+        )
+
+    def test_unlink_fails_closed_when_login_process_survives(self) -> None:
+        self.service.import_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        account_id = self.service.account_id("user@example.com")
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        process = Mock()
+        process.poll.return_value = None
+        process.terminate.side_effect = OSError("access denied")
+        with self.service._lock:
+            self.service._login_processes["user@example.com"] = process
+
+        response = self.client.post(
+            f"/api/codex/{account_id}/unlink",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(profile_dir.is_dir())
+        with self.service._lock:
+            self.assertIs(
+                self.service._login_processes["user@example.com"],
+                process,
+            )
+
+    def test_unlink_fails_closed_when_codex_session_survives(self) -> None:
+        self.service.import_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        account_id = self.service.account_id("user@example.com")
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        session = Mock()
+        session.close.return_value = False
+        with self.service._lock:
+            self.service._sessions["user@example.com"] = session
+
+        response = self.client.post(
+            f"/api/codex/{account_id}/unlink",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(profile_dir.is_dir())
+        with self.service._lock:
+            self.assertIs(
+                self.service._sessions["user@example.com"],
+                session,
+            )
+
+    def test_unlink_restores_session_when_close_raises(self) -> None:
+        self.service.import_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        account_id = self.service.account_id("user@example.com")
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        session = Mock()
+        session.close.side_effect = OSError("access denied")
+        with self.service._lock:
+            self.service._sessions["user@example.com"] = session
+
+        response = self.client.post(
+            f"/api/codex/{account_id}/unlink",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(profile_dir.is_dir())
+        with self.service._lock:
+            self.assertIs(
+                self.service._sessions["user@example.com"],
+                session,
+            )
+        session.close.side_effect = None
+        session.close.return_value = True
+
+    def test_cancelled_login_waiter_cannot_refresh_or_change_status(
+        self,
+    ) -> None:
+        service = LocalWebService(
+            data_file=Path(self.temp_dir.name) / "waiter-accounts.json",
+            profiles_dir=Path(self.temp_dir.name) / "waiter-profiles",
+            enable_codex=True,
+        )
+        service.import_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        account_id = service.account_id("user@example.com")
+        process = Mock()
+        process.wait.return_value = 0
+        process.poll.return_value = None
+
+        try:
+            with (
+                patch(
+                    "app.local_web_service.build_codex_command",
+                    return_value=["codex", "login"],
+                ),
+                patch(
+                    "app.local_web_service.subprocess.Popen",
+                    return_value=process,
+                ),
+                patch("app.local_web_service.threading.Thread") as thread_type,
+                patch.object(service, "refresh_async") as refresh_async,
+            ):
+                service.login(account_id)
+                wait_for_login = thread_type.call_args.kwargs["target"]
+                with service._lock:
+                    service._login_processes = {}
+                    service._codex_info["user@example.com"] = CodexInfo(
+                        stored_email="user@example.com",
+                        status="Chưa liên kết",
+                    )
+
+                wait_for_login()
+
+            refresh_async.assert_not_called()
+            self.assertEqual(
+                service.state()["accounts"][0]["sync_status"],
+                "Chưa liên kết",
+            )
+        finally:
+            service.close()
+
+    def test_reset_profile_contract_is_removed(self) -> None:
+        self.service.import_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        account_id = self.service.account_id("user@example.com")
+
+        response = self.client.post(
+            f"/api/codex/{account_id}/reset-profile",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(hasattr(self.service, "reset_profile"))
+
+    def test_orphan_archive_contract_is_removed(self) -> None:
         orphan_dir = self.service.profiles_dir / "orphan-profile"
         orphan_dir.mkdir()
-        (orphan_dir / "auth.json").write_text(
-            "orphan-auth-content",
-            encoding="utf-8",
-        )
-        self.assertEqual(
-            self.client.get("/api/state").json()["orphan_profile_count"],
-            1,
-        )
-        with patch.object(Path, "open", reject_auth_reads):
-            archive = self.client.post(
-                "/api/profiles/orphans/archive",
-                headers=self.headers,
-            )
-        self.assertEqual(archive.status_code, 200, archive.text)
-        self.assertFalse(orphan_dir.exists())
-        self.assertEqual(
-            self.client.get("/api/state").json()["orphan_profile_count"],
-            0,
+        state = self.client.get("/api/state").json()
+        response = self.client.post(
+            "/api/profiles/orphans/archive",
+            headers=self.headers,
         )
 
-        archived_auth_values = {
-            path.read_text(encoding="utf-8")
-            for path in (self.service.profiles_dir / ".archived").rglob(
-                "auth.json"
-            )
-        }
-        self.assertEqual(
-            archived_auth_values,
-            {
-                "unlink-auth-content",
-                "reset-auth-content",
-                "orphan-auth-content",
-            },
-        )
+        self.assertNotIn("orphan_profile_count", self.service.state())
+        self.assertNotIn("orphan_profile_count", state)
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(orphan_dir.is_dir())
 
     def test_state_recommends_valid_account_with_highest_quota(self) -> None:
         self.add_service_accounts(
@@ -1061,26 +1284,6 @@ class LocalWebApiTests(unittest.TestCase):
         with self.service._lock:
             self.assertNotIn(key, self.service._token_usage_cache)
 
-    def test_archive_revalidates_destination_before_protecting_it(self) -> None:
-        profiles_dir = Path(self.temp_dir.name) / "safe-profiles"
-        profiles_dir.mkdir()
-        profile_dir = profiles_dir / "profile"
-        profile_dir.mkdir()
-
-        with (
-            patch(
-                "app.local_web_profiles.is_reparse_point",
-                side_effect=lambda path: path.name != ".archived",
-            ),
-            patch(
-                "app.local_web_profiles.protect_sensitive_path"
-            ) as protect_path,
-        ):
-            with self.assertRaises(UnsafeProfilePathError):
-                archive_profile_directory(profiles_dir, profile_dir)
-
-        self.assertEqual(protect_path.call_count, 1)
-
     def test_rejects_malformed_host_authority(self) -> None:
         response = self.client.get(
             "/api/state",
@@ -1280,13 +1483,143 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("secret-and-token-value", response.text)
 
-    def test_delete_account_requires_csrf_and_removes_it(self) -> None:
+    def test_update_password_persists_without_touching_codex(self) -> None:
         self.add_account(
-            "user@example.com|password|JBSWY3DPEHPK3PXP",
+            "user@example.com|old-password|JBSWY3DPEHPK3PXP",
         )
         account_id = self.client.get(
             "/api/state"
         ).json()["accounts"][0]["id"]
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        marker = profile_dir / "profile-marker"
+        marker.write_text("unchanged", encoding="utf-8")
+        session = Mock()
+        with self.service._lock:
+            self.service._sessions = {"user@example.com": session}
+
+        response = self.client.patch(
+            f"/api/accounts/{account_id}/password",
+            headers=self.headers,
+            json={"password": "new | mật khẩu"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"updated": True})
+        self.assertNotIn("new | mật khẩu", response.text)
+        self.assertEqual(
+            self.service.sensitive_value(account_id, "password"),
+            "new | mật khẩu",
+        )
+        self.assertEqual(
+            self.service.sensitive_value(account_id, "secret"),
+            "JBSWY3DPEHPK3PXP",
+        )
+        self.assertEqual(self.service._load_accounts()[0].password, "new | mật khẩu")
+        self.assertEqual(marker.read_text(encoding="utf-8"), "unchanged")
+        session.close.assert_not_called()
+        with self.service._lock:
+            self.assertIs(self.service._sessions["user@example.com"], session)
+
+    def test_update_password_rejects_blank_and_requires_csrf(self) -> None:
+        self.add_account(
+            "user@example.com|old-password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+
+        missing_csrf = self.client.patch(
+            f"/api/accounts/{account_id}/password",
+            json={"password": "new-password"},
+        )
+        blank = self.client.patch(
+            f"/api/accounts/{account_id}/password",
+            headers=self.headers,
+            json={"password": "   "},
+        )
+        too_long_value = "sensitive-value-" * 300
+        too_long = self.client.patch(
+            f"/api/accounts/{account_id}/password",
+            headers=self.headers,
+            json={"password": too_long_value},
+        )
+
+        self.assertEqual(missing_csrf.status_code, 403)
+        self.assertEqual(blank.status_code, 400)
+        self.assertEqual(too_long.status_code, 400)
+        self.assertNotIn(too_long_value, too_long.text)
+        self.assertNotIn("old-password", blank.text)
+        self.assertEqual(
+            self.service.sensitive_value(account_id, "password"),
+            "old-password",
+        )
+
+    def test_update_password_keeps_old_value_when_save_fails(self) -> None:
+        self.add_account(
+            "user@example.com|old-password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+
+        with patch.object(
+            self.service,
+            "_save_accounts",
+            side_effect=OSError("disk full"),
+        ):
+            response = self.client.patch(
+                f"/api/accounts/{account_id}/password",
+                headers=self.headers,
+                json={"password": "new-password"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("new-password", response.text)
+        self.assertEqual(
+            self.service.sensitive_value(account_id, "password"),
+            "old-password",
+        )
+
+    def test_update_password_has_no_failure_point_after_atomic_replace(
+        self,
+    ) -> None:
+        self.add_account(
+            "user@example.com|old-password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+
+        with patch(
+            "app.local_web_service.protect_sensitive_path",
+            side_effect=[None, OSError("post-replace ACL failure")],
+        ) as protect:
+            response = self.client.patch(
+                f"/api/accounts/{account_id}/password",
+                headers=self.headers,
+                json={"password": "new-password"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(protect.call_count, 1)
+        self.assertEqual(
+            self.service.sensitive_value(account_id, "password"),
+            "new-password",
+        )
+
+    def test_delete_account_requires_csrf_and_removes_it(self) -> None:
+        account_line = "user@example.com|password|JBSWY3DPEHPK3PXP"
+        self.add_account(account_line)
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        (profile_dir / "auth.json").write_text(
+            "must-be-deleted-without-reading",
+            encoding="utf-8",
+        )
 
         response = self.client.delete(
             f"/api/accounts/{account_id}",
@@ -1298,6 +1631,119 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.get("/api/state").json()["accounts"],
             [],
+        )
+        self.assertFalse(profile_dir.exists())
+        self.assertFalse((self.service.profiles_dir / ".archived").exists())
+
+        reimport = self.add_account(account_line)
+
+        self.assertEqual(reimport.status_code, 200, reimport.text)
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"][0]["email"],
+            "user@example.com",
+        )
+
+    def test_delete_account_keeps_record_when_profile_is_unsafe(self) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+        with patch(
+            "app.local_web_service.stage_profile_directory_for_deletion",
+            side_effect=UnsafeProfilePathError("unsafe"),
+        ):
+            response = self.client.delete(
+                f"/api/accounts/{account_id}",
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"][0]["email"],
+            "user@example.com",
+        )
+
+    def test_delete_account_does_not_restore_partly_deleted_profile(
+        self,
+    ) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+
+        with patch(
+            "app.local_web_service.delete_profile_directory",
+            side_effect=OSError("locked staged file"),
+        ):
+            response = self.client.delete(
+                f"/api/accounts/{account_id}",
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(profile_dir.exists())
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"],
+            [],
+        )
+        self.assertTrue(
+            list(
+                self.service.profiles_dir.glob(
+                    f".{profile_dir.name}.deleting-*"
+                )
+            )
+        )
+
+        data_file = self.service.data_file
+        profiles_dir = self.service.profiles_dir
+        self.service.close()
+        self.service = LocalWebService(
+            data_file=data_file,
+            profiles_dir=profiles_dir,
+            enable_codex=False,
+        )
+        self.service.start()
+
+        self.assertEqual(
+            list(
+                profiles_dir.glob(
+                    f".{profile_dir.name}.deleting-*"
+                )
+            ),
+            [],
+        )
+
+    def test_delete_account_keeps_profile_when_save_fails(self) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+
+        with patch.object(
+            self.service,
+            "_save_accounts",
+            side_effect=OSError("disk full"),
+        ):
+            response = self.client.delete(
+                f"/api/accounts/{account_id}",
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(profile_dir.is_dir())
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"][0]["email"],
+            "user@example.com",
         )
 
     def test_rejects_cross_origin_mutation(self) -> None:

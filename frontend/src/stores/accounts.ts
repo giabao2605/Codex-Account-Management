@@ -5,7 +5,6 @@ import type {
   AccountCheckResponse,
   AccountState,
   AddAccountResponse,
-  ArchiveProfilesResponse,
 } from "@/types/api.ts";
 import {
   accountMatchesFilter,
@@ -17,7 +16,6 @@ export type AccountAction =
   | "refresh"
   | "login"
   | "unlink"
-  | "reset-profile"
   | "delete"
   | "password"
   | "secret";
@@ -80,16 +78,14 @@ export const useAccountsStore = defineStore("accounts", () => {
 
   async function lifecycle(
     accountId: string,
-    action: "login" | "unlink" | "reset-profile",
+    action: "login" | "unlink",
   ): Promise<void> {
     await withBusy(accountId, action, async () => {
       const client = session.getClient();
       if (action === "login") {
         await client.login(accountId);
-      } else if (action === "unlink") {
-        await client.unlink(accountId);
       } else {
-        await client.resetProfile(accountId);
+        await client.unlink(accountId);
       }
       await session.pollState();
     });
@@ -99,6 +95,15 @@ export const useAccountsStore = defineStore("accounts", () => {
     await withBusy(accountId, "delete", async () => {
       await session.getClient().deleteAccount(accountId);
       await session.pollState();
+    });
+  }
+
+  async function updatePassword(
+    accountId: string,
+    password: string,
+  ): Promise<void> {
+    await withBusy(accountId, "password", async () => {
+      await session.getClient().updatePassword(accountId, password);
     });
   }
 
@@ -112,12 +117,6 @@ export const useAccountsStore = defineStore("accounts", () => {
     return result;
   }
 
-  async function archiveOrphans(): Promise<ArchiveProfilesResponse> {
-    const result = await session.getClient().archiveOrphans();
-    await session.pollState();
-    return result;
-  }
-
   function accountById(accountId: string): AccountState | undefined {
     return accounts.value.find((account) => account.id === accountId);
   }
@@ -126,7 +125,6 @@ export const useAccountsStore = defineStore("accounts", () => {
     accountById,
     accounts,
     addAccount,
-    archiveOrphans,
     checkAccount,
     deleteAccount,
     filter,
@@ -135,5 +133,6 @@ export const useAccountsStore = defineStore("accounts", () => {
     lifecycle,
     refresh,
     sensitiveValue,
+    updatePassword,
   };
 });

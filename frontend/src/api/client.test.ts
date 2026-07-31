@@ -83,13 +83,14 @@ describe("LocalApiClient", () => {
     await client.checkAccount("alpha@example.test|password|secret");
     await client.addAccount("alpha@example.test|password|secret");
     await client.sensitiveValue("1111111111111111", "password");
+    await client.updatePassword("1111111111111111", "new-password");
     await client.refresh("1111111111111111");
     await client.login("1111111111111111");
     await client.unlink("1111111111111111");
-    await client.resetProfile("1111111111111111");
     await client.deleteAccount("1111111111111111");
-    await client.archiveOrphans();
     await client.shutdown();
+    expect("archiveOrphans" in client).toBe(false);
+    expect("resetProfile" in client).toBe(false);
 
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       "/api/state",
@@ -97,14 +98,20 @@ describe("LocalApiClient", () => {
       "/api/accounts/import/check",
       "/api/accounts/import",
       "/api/accounts/1111111111111111/sensitive",
+      "/api/accounts/1111111111111111/password",
       "/api/codex/refresh",
       "/api/codex/1111111111111111/login",
       "/api/codex/1111111111111111/unlink",
-      "/api/codex/1111111111111111/reset-profile",
       "/api/accounts/1111111111111111",
-      "/api/profiles/orphans/archive",
       "/api/application/shutdown",
     ]);
+    const passwordCall = fetchMock.mock.calls.find(
+      ([path]) => path === "/api/accounts/1111111111111111/password",
+    )!;
+    expect(passwordCall[1]).toEqual(expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ password: "new-password" }),
+    }));
 
     const mutationCalls = fetchMock.mock.calls.slice(2);
     expect(

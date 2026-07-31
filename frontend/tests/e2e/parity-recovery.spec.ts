@@ -43,6 +43,16 @@ test("restores the legacy account overview, filters, and card hierarchy", async 
   await expect(alphaCard.getByText("Đề xuất sử dụng", { exact: true }))
     .toBeVisible();
   await expect(alphaCard.getByText(/Còn 24 giây/)).toBeVisible();
+  const quotaWindows = alphaCard.locator(".quota-window");
+  await expect(quotaWindows).toHaveCount(2);
+  await expect(quotaWindows.nth(0)).toContainText("5 giờ");
+  await expect(quotaWindows.nth(0)).toContainText("82%");
+  await expect(quotaWindows.nth(1)).toContainText("Weekly");
+  await expect(quotaWindows.nth(1)).toContainText("64%");
+  const quotaResets = alphaCard.locator(".quota-reset-row");
+  await expect(quotaResets).toHaveCount(2);
+  await expect(quotaResets.nth(0)).toContainText("23/07 14:00");
+  await expect(quotaResets.nth(1)).toContainText("28/07 09:00");
   await expect(alphaCard.getByText("23/07 09:45", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: /Lọc tài khoản/ }).click();
@@ -56,8 +66,28 @@ test("restores the legacy account overview, filters, and card hierarchy", async 
   await expect(alphaCard.getByRole("menuitem", { name: /Đồng bộ/ })).toBeVisible();
   await expect(alphaCard.getByRole("menuitem", { name: /Ngắt liên kết/ }))
     .toBeVisible();
+  await expect(alphaCard.locator('[data-action="reset-profile"]')).toHaveCount(0);
+  await expect(alphaCard.getByRole("menuitem", {
+    name: "Chỉnh sửa mật khẩu",
+  })).toBeVisible();
   await expect(alphaCard.getByRole("menuitem", { name: /Xóa tài khoản/ }))
     .toBeVisible();
+
+  await alphaCard.getByRole("menuitem", {
+    name: "Chỉnh sửa mật khẩu",
+  }).click();
+  const passwordDialog = page.getByRole("dialog", {
+    name: "Chỉnh sửa mật khẩu",
+  });
+  await expect(passwordDialog).toContainText(
+    "không đổi mật khẩu OpenAI/ChatGPT",
+  );
+  await passwordDialog.getByLabel(/Mật khẩu mới/).fill("new-password");
+  await passwordDialog.getByRole("button", { name: "Lưu" }).click();
+  await expect(passwordDialog).toBeHidden();
+  await expect(page.getByRole("status")).toContainText(
+    "Đã cập nhật mật khẩu đã lưu.",
+  );
 });
 
 test("checks and adds one account without a preview step", async ({ page }) => {

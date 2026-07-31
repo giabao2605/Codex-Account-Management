@@ -17,6 +17,7 @@ function account(overrides: Partial<AccountState> = {}): AccountState {
     quota_remaining: "82%",
     quota_cycle: "5 giờ",
     quota_reset_at: "23/07 14:00",
+    quota_windows: [],
     plan_type: "Plus",
     account_state: "Hoạt động bình thường",
     sync_status: "Đã đồng bộ",

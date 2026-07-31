@@ -14,7 +14,11 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from .codex_sync import CodexProfileSession, CodexReloginRequired
+from .codex_sync import (
+    CodexProfileSession,
+    CodexReloginRequired,
+    normalize_quota_snapshot,
+)
 from .local_web_accounts import (
     AccountConflictError,
     append_new_account,
@@ -22,8 +26,11 @@ from .local_web_accounts import (
     parse_new_account,
 )
 from .local_web_profiles import (
-    archive_profile_directory,
-    list_orphan_profile_directories,
+    UnsafeProfilePathError,
+    delete_profile_directory,
+    delete_staged_profile_directories,
+    restore_staged_profile_directory,
+    stage_profile_directory_for_deletion,
     validate_profiles_root,
 )
 from .otp_codex_manager_with_account_status import (
@@ -94,6 +101,80 @@ def account_display_sort_key(
     return (1, -quota, email)
 
 
+def _format_remaining_percent(value: object) -> str:
+    if value is None or isinstance(value, bool):
+        return "—"
+    try:
+        used_percent = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    remaining = max(0.0, min(100.0, 100.0 - used_percent))
+    return (
+        f"{int(round(remaining))}%"
+        if abs(remaining - round(remaining)) < 0.05
+        else f"{remaining:.1f}%"
+    )
+
+
+def _format_quota_windows(result: dict) -> tuple[dict[str, str], ...]:
+    limits = result.get("limits")
+    quota = result.get("quota")
+    if not isinstance(quota, dict) and isinstance(limits, dict):
+        quota = normalize_quota_snapshot(limits).to_dict()
+    windows = quota.get("windows") if isinstance(quota, dict) else None
+    candidates = (
+        [window for window in windows if isinstance(window, dict)]
+        if isinstance(windows, list)
+        else []
+    )
+    preferred_limit_id = (
+        "codex"
+        if any(window.get("limit_id") == "codex" for window in candidates)
+        else next(
+            (
+                window.get("limit_id")
+                for window in candidates
+                if window.get("limit_id") is not None
+            ),
+            None,
+        )
+    )
+    if preferred_limit_id is not None:
+        candidates = [
+            window
+            for window in candidates
+            if window.get("limit_id") == preferred_limit_id
+        ]
+
+    def duration(window: dict) -> int:
+        value = window.get(
+            "windowDurationMins",
+            window.get("window_duration_minutes"),
+        )
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 2**31 - 1
+
+    return tuple(
+        {
+            "quota_remaining": _format_remaining_percent(
+                window.get("usedPercent", window.get("used_percent"))
+            ),
+            "quota_cycle": format_cycle(
+                window.get(
+                    "windowDurationMins",
+                    window.get("window_duration_minutes"),
+                )
+            ),
+            "quota_reset_at": format_reset_time(
+                window.get("resetsAt", window.get("resets_at"))
+            ),
+        }
+        for window in sorted(candidates, key=duration)[:2]
+    )
+
+
 class LocalWebService:
     def __init__(
         self,
@@ -141,6 +222,10 @@ class LocalWebService:
                 exist_ok=True,
             )
             validate_profiles_root(self.profiles_dir)
+            try:
+                delete_staged_profile_directories(self.profiles_dir)
+            except (OSError, UnsafeProfilePathError):
+                pass
             protect_sensitive_tree(self.profiles_dir)
 
             if self.data_file.exists():
@@ -211,6 +296,9 @@ class LocalWebService:
                     "quota_remaining": info.remaining_percent,
                     "quota_cycle": info.cycle,
                     "quota_reset_at": info.reset_at,
+                    "quota_windows": [
+                        dict(window) for window in info.quota_windows
+                    ],
                     "plan_type": info.plan_type,
                     "account_state": info.account_state,
                     "sync_status": info.status,
@@ -221,7 +309,6 @@ class LocalWebService:
             "accounts": sorted(rows, key=account_display_sort_key),
             "sync_status": sync_status,
             "refresh_interval_seconds": self.refresh_interval_seconds,
-            "orphan_profile_count": self.orphan_profile_count(),
             "recommendation": self._recommend_account(rows),
             "usage_statistics": self._usage_statistics(rows),
             "time_sync": time_sync,
@@ -298,23 +385,52 @@ class LocalWebService:
             with self._lock:
                 account = self._find_account_locked(account_id)
                 key = account.email.casefold()
+                profile_dir = self.profile_directory(account.email)
+                current_accounts = tuple(self._accounts)
                 new_accounts = tuple(
                     item
-                    for item in self._accounts
+                    for item in current_accounts
                     if item.email.casefold() != key
+            )
+
+            with self._profile_lock_for(key):
+                if not self._stop_login_process(key):
+                    raise OSError("Không thể dừng đăng nhập Codex.")
+                if not self._close_session(key):
+                    raise OSError("Không thể dừng Codex App Server.")
+                delete_staged_profile_directories(
+                    self.profiles_dir,
+                    profile_dir,
                 )
+                staged_profile_dir = (
+                    stage_profile_directory_for_deletion(
+                        self.profiles_dir,
+                        profile_dir,
+                    )
+                )
+                try:
+                    self._save_accounts(new_accounts)
+                except (OSError, UnsafeProfilePathError):
+                    if staged_profile_dir is not None:
+                        restore_staged_profile_directory(
+                            self.profiles_dir,
+                            staged_profile_dir,
+                            profile_dir,
+                        )
+                    self._save_accounts(current_accounts)
+                    raise
 
-            self._save_accounts(new_accounts)
+                with self._lock:
+                    self._accounts = new_accounts
+                    self._codex_info.pop(key, None)
+                    self._token_usage_cache.pop(key, None)
+                    self._relogin_required.discard(key)
 
-            with self._lock:
-                self._accounts = new_accounts
-                self._codex_info.pop(key, None)
-                self._token_usage_cache.pop(key, None)
-                self._relogin_required.discard(key)
-                session = self._sessions.pop(key, None)
-
-        if session is not None:
-            session.close()
+                if staged_profile_dir is not None:
+                    delete_profile_directory(
+                        self.profiles_dir,
+                        staged_profile_dir,
+                    )
 
         return True
 
@@ -324,9 +440,18 @@ class LocalWebService:
                 account_id
             )
             with self._profile_lock_for(key):
-                self._stop_login_process(key)
-                self._close_session(key)
-                archive_profile_directory(self.profiles_dir, profile_dir)
+                if not self._stop_login_process(key):
+                    raise OSError("Không thể dừng đăng nhập Codex.")
+                if not self._close_session(key):
+                    raise OSError("Không thể dừng Codex App Server.")
+                delete_staged_profile_directories(
+                    self.profiles_dir,
+                    profile_dir,
+                )
+                staged_profile_dir = stage_profile_directory_for_deletion(
+                    self.profiles_dir,
+                    profile_dir,
+                )
                 with self._lock:
                     self._token_usage_cache.pop(key, None)
                     self._relogin_required.discard(key)
@@ -339,58 +464,18 @@ class LocalWebService:
                             remaining_percent="—",
                             cycle="—",
                             reset_at="—",
+                            quota_windows=(),
                             plan_type="—",
                             account_state="Chưa xác định",
                             status="Chưa liên kết",
                             last_sync="—",
                         )
+                if staged_profile_dir is not None:
+                    delete_profile_directory(
+                        self.profiles_dir,
+                        staged_profile_dir,
+                    )
         return True
-
-    def reset_profile(self, account_id: str) -> bool:
-        with self._account_write_lock:
-            account, key, profile_dir = self._profile_operation_context(
-                account_id
-            )
-            with self._profile_lock_for(key):
-                self._stop_login_process(key)
-                self._close_session(key)
-                archive_profile_directory(self.profiles_dir, profile_dir)
-                profile_dir.mkdir(parents=False, exist_ok=False)
-                protect_sensitive_path(profile_dir)
-                with self._lock:
-                    self._token_usage_cache.pop(key, None)
-                    self._relogin_required.discard(key)
-                    current = self._codex_info.get(key)
-                    if current is not None:
-                        self._codex_info[key] = replace(
-                            current,
-                            stored_email=account.email,
-                            codex_email="—",
-                            remaining_percent="—",
-                            cycle="—",
-                            reset_at="—",
-                            plan_type="—",
-                            account_state="Chưa xác định",
-                            status=(
-                                "Profile đã đặt lại – cần liên kết Codex"
-                            ),
-                            last_sync="—",
-                        )
-        return True
-
-    def orphan_profile_count(self) -> int:
-        return len(self._orphan_profile_directories())
-
-    def archive_orphan_profiles(self) -> int:
-        with self._account_write_lock:
-            archived = 0
-            for profile_dir in self._orphan_profile_directories():
-                if archive_profile_directory(
-                    self.profiles_dir,
-                    profile_dir,
-                ) is not None:
-                    archived += 1
-        return archived
 
     def sensitive_value(
         self,
@@ -407,6 +492,29 @@ class LocalWebService:
             return account.secret
 
         raise ValueError("Trường dữ liệu không hợp lệ.")
+
+    def update_password(self, account_id: str, password: str) -> bool:
+        if not password.strip():
+            raise ValueError("Mật khẩu không được để trống.")
+        if len(password) > 4096:
+            raise ValueError("Mật khẩu không được dài quá 4096 ký tự.")
+
+        with self._account_write_lock:
+            with self._lock:
+                account = self._find_account_locked(account_id)
+                new_accounts = tuple(
+                    replace(item, password=password)
+                    if item is account
+                    else item
+                    for item in self._accounts
+                )
+
+            self._save_accounts(new_accounts)
+
+            with self._lock:
+                self._accounts = new_accounts
+
+        return True
 
     def refresh_async(
         self,
@@ -460,14 +568,14 @@ class LocalWebService:
             raise RuntimeError("Không tìm thấy Codex CLI.")
 
         with self._lock:
-            session = self._sessions.pop(key, None)
             self._token_usage_cache.pop(key, None)
             self._relogin_required.discard(key)
 
-        if session is not None:
-            session.close()
+        if not self._close_session(key):
+            raise RuntimeError("Không thể dừng Codex App Server.")
 
-        self._stop_login_process(key)
+        if not self._stop_login_process(key):
+            raise RuntimeError("Không thể dừng đăng nhập Codex trước đó.")
 
         profile_dir = self.profile_directory(account.email)
         creation_flags = 0
@@ -511,13 +619,14 @@ class LocalWebService:
             return_code = process.wait()
 
             with self._lock:
-                if self._login_processes.get(key) is process:
-                    self._login_processes = {
-                        process_key: current_process
-                        for process_key, current_process
-                        in self._login_processes.items()
-                        if process_key != key
-                    }
+                if self._login_processes.get(key) is not process:
+                    return
+                self._login_processes = {
+                    process_key: current_process
+                    for process_key, current_process
+                    in self._login_processes.items()
+                    if process_key != key
+                }
                 current = self._codex_info.get(key)
 
                 if current is not None:
@@ -777,41 +886,52 @@ class LocalWebService:
             return lock
 
     @staticmethod
-    def _terminate_login_process(process: subprocess.Popen) -> None:
-        if process.poll() is not None:
-            return
+    def _terminate_login_process(process: subprocess.Popen) -> bool:
         try:
+            if process.poll() is not None:
+                return True
             process.terminate()
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
-        except (OSError, subprocess.SubprocessError):
-            return
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+            return True
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            subprocess.TimeoutExpired,
+        ):
+            return False
 
-    def _stop_login_process(self, key: str) -> None:
+    def _stop_login_process(self, key: str) -> bool:
         with self._lock:
             process = self._login_processes.get(key)
-            if process is not None:
-                self._login_processes = {
-                    process_key: current_process
-                    for process_key, current_process
-                    in self._login_processes.items()
-                    if process_key != key
-                }
-        if process is not None:
-            self._terminate_login_process(process)
-
-    def _orphan_profile_directories(self) -> tuple[Path, ...]:
-        with self._lock:
-            active_profile_names = {
-                self.profile_directory(account.email).name
-                for account in self._accounts
+            if process is None:
+                return True
+            self._login_processes = {
+                process_key: current_process
+                for process_key, current_process
+                in self._login_processes.items()
+                if process_key != key
             }
-        return list_orphan_profile_directories(
-            self.profiles_dir,
-            active_profile_names,
-        )
+
+        terminated = self._terminate_login_process(process)
+        if not terminated:
+            try:
+                terminated = process.poll() is not None
+            except (OSError, subprocess.SubprocessError):
+                terminated = False
+        if terminated:
+            return True
+
+        with self._lock:
+            if key not in self._login_processes:
+                self._login_processes = {
+                    **self._login_processes,
+                    key: process,
+                }
+        return False
 
     def _load_accounts(self) -> tuple[Account, ...]:
         if not self.data_file.exists():
@@ -877,7 +997,6 @@ class LocalWebService:
             )
             protect_sensitive_path(temporary_file)
             temporary_file.replace(self.data_file)
-            protect_sensitive_path(self.data_file)
         finally:
             temporary_file.unlink(missing_ok=True)
 
@@ -1194,12 +1313,28 @@ class LocalWebService:
         session.close()
         return concurrent
 
-    def _close_session(self, key: str) -> None:
+    def _close_session(self, key: str) -> bool:
         with self._lock:
             session = self._sessions.pop(key, None)
 
-        if session is not None:
-            session.close()
+        if session is None:
+            return True
+
+        try:
+            closed = session.close()
+        except Exception:
+            closed = False
+
+        if closed is not False:
+            return True
+
+        with self._lock:
+            if key not in self._sessions:
+                self._sessions = {
+                    **self._sessions,
+                    key: session,
+                }
+        return False
 
     def _mark_relogin(self, key: str) -> None:
         with self._lock:
@@ -1250,6 +1385,7 @@ class LocalWebService:
                     remaining_percent="—",
                     cycle="—",
                     reset_at="—",
+                    quota_windows=(),
                     plan_type="—",
                     account_state="Sai tài khoản Codex",
                     status=(
@@ -1269,24 +1405,13 @@ class LocalWebService:
         remaining_percent = "—"
         cycle = "—"
         reset_at = "—"
+        quota_windows = _format_quota_windows(result)
         status = "Không có dữ liệu quota"
 
         if window is not None:
-            try:
-                used_percent = float(
-                    window.get("usedPercent", 0) or 0
-                )
-                remaining = max(
-                    0.0,
-                    min(100.0, 100.0 - used_percent),
-                )
-                remaining_percent = (
-                    f"{int(round(remaining))}%"
-                    if abs(remaining - round(remaining)) < 0.05
-                    else f"{remaining:.1f}%"
-                )
-            except (TypeError, ValueError):
-                remaining_percent = "—"
+            remaining_percent = _format_remaining_percent(
+                window.get("usedPercent")
+            )
 
             cycle = format_cycle(
                 window.get("windowDurationMins")
@@ -1309,6 +1434,7 @@ class LocalWebService:
                 remaining_percent=remaining_percent,
                 cycle=cycle,
                 reset_at=reset_at,
+                quota_windows=quota_windows,
                 plan_type=(
                     plan_type.capitalize()
                     if plan_type != "—"

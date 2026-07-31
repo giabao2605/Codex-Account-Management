@@ -7,7 +7,7 @@ Phase 1 khóa trạng thái frontend/backend hiện tại trước khi scaffold 
 ## Baseline kỹ thuật
 
 - Branch hiện tại: `main`, commit gốc đang checkout: `b8d87ff`, working tree có thay đổi chưa commit.
-- Backend contract hiện tại: `API_SCHEMA_VERSION = 5`.
+- Backend contract hiện tại: `API_SCHEMA_VERSION = 10`.
 - Token usage contract hiện tại: `TokenUsageResponse.schema_version = 2`, `source = "codex_account_usage"`.
 - Frontend hiện tại vẫn là vanilla HTML/CSS/JS trong `web/`; chưa có `frontend/`, Vite, Vue, Pinia, hoặc Playwright trong baseline.
 - Build fingerprint hiện tính từ runtime Python, local web service, token usage module, và các asset `web/`.
@@ -57,7 +57,7 @@ Visual fixture xác nhận ba account states, nullable OTP, recommendation, toke
 | Nullable OTP | Khi trusted time chưa sẵn sàng, OTP và countdown nullable; copy OTP disabled. | Component phải phân biệt unavailable với empty string hoặc 0. |
 | Import preview | Preview read-only, redacts credentials, apply cần preview token, chống stale/tamper. | Dialog Vue giữ preview token trong memory, reset token khi đóng hoặc preview mới. |
 | Token usage | `/api/usage/tokens` trả thống kê token an toàn, không expose secret/runtime path. | Usage store cache 5 phút, phân biệt `fresh`, `stale`, `unavailable`, và không suy diễn null thành 0. |
-| Shutdown/profile lifecycle | Shutdown, unlink, reset, archive orphan profile là mutation cần auth/CSRF và path-safe checks. | Mọi action giữ disabled/loading/error state tương đương baseline. |
+| Shutdown/profile lifecycle | Shutdown và unlink là mutation cần auth/CSRF và path-safe checks. | Mọi action giữ disabled/loading/error state tương đương baseline. |
 
 ## API parity matrix
 
@@ -73,9 +73,7 @@ Visual fixture xác nhận ba account states, nullable OTP, recommendation, toke
 | `/api/accounts/{account_id}/sensitive` | POST | CSRF-protected reveal password/secret theo field whitelist. | `test_invalid_sensitive_field_does_not_echo_input` |
 | `/api/codex/refresh` | POST | Refresh all hoặc một account; `force_token_usage` buộc làm mới token. | `test_manual_refresh_can_force_token_usage_refresh`, `test_account_refresh_can_force_token_usage_refresh` |
 | `/api/codex/{account_id}/login` | POST | Mở login local cho account. | `test_lifecycle_mutations_require_authentication_and_csrf` |
-| `/api/codex/{account_id}/unlink` | POST | Ngắt liên kết profile an toàn, không archive nhầm path. | `test_profile_lifecycle_archives_without_reading_auth_file` |
-| `/api/codex/{account_id}/reset-profile` | POST | Reset profile an toàn, clear trạng thái liên quan. | `test_lifecycle_mutations_require_authentication_and_csrf` |
-| `/api/profiles/orphans/archive` | POST | Archive orphan profiles sau path validation. | `test_archive_revalidates_destination_before_protecting_it` |
+| `/api/codex/{account_id}/unlink` | POST | Ngắt liên kết và xóa vĩnh viễn profile local sau path validation. | `test_unlink_permanently_deletes_profile_without_reading_auth` |
 | `/api/application/shutdown` | POST | Shutdown callback at-most-once, retry được nếu callback fail. | `test_shutdown_callback_is_invoked_at_most_once`, `test_shutdown_can_retry_after_callback_failure` |
 
 ## Frontend parity matrix
@@ -87,7 +85,7 @@ Visual fixture xác nhận ba account states, nullable OTP, recommendation, toke
 | Accounts overview | Summary cards, sync breakdown, refresh interval, time sync. | Không mất các chỉ số account count, last updated, sync ratio, time sync status. |
 | Account list | Sort ưu tiên attention/quota, recommended badge, filters, primary và option actions. | Giữ thứ tự, filter semantics, disabled state cho unavailable OTP, và copy feedback. |
 | Import dialog | Open/close/cancel, textarea, preview counts, changes, errors, reject-on-errors, confirm save. | Preview không ghi dữ liệu, đóng dialog reset transient state, apply refresh lại state. |
-| Profile lifecycle | Login, unlink, reset profile, archive orphan profiles. | Action buttons phải giữ loading state, disabled state, error toast, và không expose path/profile content. |
+| Profile lifecycle | Login và unlink. | Action buttons phải giữ loading state, disabled state, error toast, và không expose path/profile content. |
 | Usage dashboard | Account selector, freshness badge, selected-account KPIs, heatmap daily/weekly/cumulative, single quota card, all-account quota table. | Giữ phân biệt all account vs single account, `daily_buckets: []` khác `daily_buckets: null`, tooltip/focus accessible. |
 | Theme | `otp-codex-theme`, `theme-init.js`, muted Light Mode palette, Dark Mode isolated. | Appearance store phải đọc legacy key và ghi lại để rollback không mất lựa chọn. |
 | Feedback | Toast, aria-live status, empty states, unavailable/stale labels. | Không làm im lặng lỗi; user-facing error vẫn generic, không echo input nhạy cảm. |

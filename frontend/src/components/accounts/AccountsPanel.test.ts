@@ -63,22 +63,14 @@ describe("AccountsPanel", () => {
     ).toHaveLength(2);
   });
 
-  it("confirms orphan archive and reports generic global feedback", async () => {
-    const accounts = useAccountsStore();
-    const archiveOrphans = vi.spyOn(accounts, "archiveOrphans")
-      .mockResolvedValue({ archived: 1 });
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+  it("does not expose orphan profile archiving", () => {
     const wrapper = mount(AccountsPanel);
 
-    await wrapper.get('[data-action="archive-orphans"]').trigger("click");
-    await flushPromises();
-
-    expect(archiveOrphans).toHaveBeenCalledOnce();
-    expect(useFeedbackStore().message).toBe("Đã lưu trữ 1 profile mồ côi.");
-    expect(useFeedbackStore().isError).toBe(false);
+    expect(wrapper.find('[data-action="archive-orphans"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("profile mồ côi");
   });
 
-  it("requires confirmation before unlink, reset, and delete mutations", async () => {
+  it("requires confirmation before unlink and delete mutations", async () => {
     const accounts = useAccountsStore();
     const lifecycle = vi.spyOn(accounts, "lifecycle").mockResolvedValue();
     const deleteAccount = vi.spyOn(accounts, "deleteAccount").mockResolvedValue();
@@ -92,15 +84,13 @@ describe("AccountsPanel", () => {
     await options().trigger("click");
     await vi.dynamicImportSettled();
     await wrapper.get('[data-action="unlink"]').trigger("click");
-    await options().trigger("click");
-    await vi.dynamicImportSettled();
-    await wrapper.get('[data-action="reset-profile"]').trigger("click");
+    expect(wrapper.find('[data-action="reset-profile"]').exists()).toBe(false);
     await options().trigger("click");
     await vi.dynamicImportSettled();
     await wrapper.get('[data-action="delete"]').trigger("click");
     await flushPromises();
 
-    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(confirm).toHaveBeenCalledTimes(2);
     expect(lifecycle).not.toHaveBeenCalled();
     expect(deleteAccount).not.toHaveBeenCalled();
   });
@@ -119,5 +109,44 @@ describe("AccountsPanel", () => {
     expect(wrapper.text()).not.toContain("transient-password");
     expect(JSON.stringify(accounts.$state)).not.toContain("transient-password");
     expect(useFeedbackStore().message).not.toContain("transient-password");
+  });
+
+  it("updates only the locally stored password without prefilling it", async () => {
+    const accounts = useAccountsStore();
+    let finishUpdate!: () => void;
+    const updatePassword = vi.spyOn(accounts, "updatePassword")
+      .mockImplementation(() => new Promise<void>((resolve) => {
+        finishUpdate = resolve;
+      }));
+    const wrapper = mount(AccountsPanel, {
+      global: { stubs: { Teleport: true } },
+    });
+
+    await wrapper.findAll('[data-action="options"]')[0]!.trigger("click");
+    await vi.dynamicImportSettled();
+    await wrapper.get('[data-action="edit-password"]').trigger("click");
+    const input = wrapper.get<HTMLInputElement>(
+      'input[name="updated-password"]',
+    );
+
+    expect(input.attributes("type")).toBe("password");
+    expect(input.element.value).toBe("");
+    expect(wrapper.get('[role="dialog"]').text()).toContain(
+      "không đổi mật khẩu OpenAI/ChatGPT",
+    );
+    await input.setValue("new-password");
+    await wrapper.get('[data-action="save-password"]').trigger("click");
+    await input.trigger("keydown.enter");
+    expect(updatePassword).toHaveBeenCalledOnce();
+    finishUpdate();
+    await flushPromises();
+
+    expect(updatePassword).toHaveBeenCalledWith(
+      applicationState().accounts[0]!.id,
+      "new-password",
+    );
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("new-password");
+    expect(JSON.stringify(accounts.$state)).not.toContain("new-password");
   });
 });

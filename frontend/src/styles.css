@@ -315,7 +315,7 @@ h3 { font-size: 1.06rem; }
 }
 .account-card {
   display: grid;
-  grid-template-rows: 64px auto auto auto;
+  grid-template-rows: 56px auto auto auto;
   padding: 18px;
   border-radius: 20px;
   background: var(--panel-background);
@@ -391,7 +391,7 @@ h3 { font-size: 1.06rem; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 0;
 }
 .account-meter {
   display: grid;
@@ -415,6 +415,13 @@ h3 { font-size: 1.06rem; }
   background: color-mix(in srgb, var(--danger-soft) 54%, var(--surface-raised));
 }
 .quota-meter.is-unknown { border-color: var(--line); background: var(--surface-deep); }
+.quota-title { color: var(--muted); font-size: .75rem; }
+.quota-window-list { display: grid; gap: 8px; }
+.quota-window { display: grid; gap: 5px; }
+.quota-window + .quota-window {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
 .meter-heading { display: flex; justify-content: space-between; gap: 9px; align-items: baseline; }
 .meter-heading span,
 .account-meter small { color: var(--muted); font-size: .75rem; }
@@ -490,7 +497,16 @@ dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 17px 0; }
 dl div { min-width: 0; padding: 10px; border-radius: 12px; background: var(--surface-deep); }
 dt { color: var(--muted); font-size: .74rem; } dd { margin: 3px 0 0; overflow-wrap: anywhere; }
 .account-sync-details { grid-template-columns: repeat(3, 1fr); margin: 12px 0; }
-.account-sync-details div { padding: 9px; }
+.account-sync-details div { min-height: 68px; padding: 9px; }
+.quota-reset-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+  font-size: .71rem;
+  white-space: nowrap;
+}
+.quota-reset-row span { color: var(--muted); }
+.quota-reset-row strong { font-weight: 650; }
 .account-primary-actions[data-liquid-container="actions"] {
   position: relative;
   display: flex;

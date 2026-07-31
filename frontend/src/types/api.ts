@@ -1,5 +1,11 @@
 export type TokenUsageStatus = "fresh" | "stale" | "unavailable";
 
+export interface QuotaWindowState {
+  quota_remaining: string;
+  quota_cycle: string;
+  quota_reset_at: string;
+}
+
 export interface AccountState {
   id: string;
   email: string;
@@ -8,6 +14,7 @@ export interface AccountState {
   quota_remaining: string;
   quota_cycle: string;
   quota_reset_at: string;
+  quota_windows: ReadonlyArray<QuotaWindowState>;
   plan_type: string;
   account_state: string;
   sync_status: string;
@@ -71,7 +78,6 @@ export interface ApplicationState {
   accounts: AccountState[];
   sync_status: string;
   refresh_interval_seconds: number;
-  orphan_profile_count: number;
   recommendation: AccountRecommendation | null;
   usage_statistics: UsageStatistics;
   time_sync: TimeSyncState;
@@ -187,6 +193,6 @@ export interface SensitiveValueResponse {
   value: string;
 }
 
-export interface ArchiveProfilesResponse {
-  archived: number;
+export interface PasswordUpdateResponse {
+  updated: boolean;
 }

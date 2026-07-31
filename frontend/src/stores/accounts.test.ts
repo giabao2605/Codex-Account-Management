@@ -51,8 +51,8 @@ describe("accounts store", () => {
       refresh: vi.fn().mockResolvedValue({ accepted: true }),
       login: vi.fn().mockResolvedValue({ accepted: true }),
       unlink: vi.fn().mockResolvedValue({ accepted: true }),
-      resetProfile: vi.fn().mockResolvedValue({ accepted: true }),
       deleteAccount: vi.fn().mockResolvedValue({ deleted: true }),
+      updatePassword: vi.fn().mockResolvedValue({ updated: true }),
       checkAccount: vi.fn().mockResolvedValue({
         valid: true,
         conflict: null,
@@ -62,7 +62,6 @@ describe("accounts store", () => {
         total: 1,
         email: "new@example.test",
       }),
-      archiveOrphans: vi.fn().mockResolvedValue({ archived: 1 }),
     };
     vi.spyOn(session, "getClient").mockReturnValue(
       client as unknown as LocalApiClient,
@@ -73,14 +72,20 @@ describe("accounts store", () => {
     expect(await store.refresh(null)).toBe(true);
     await store.lifecycle("1111111111111111", "login");
     await store.lifecycle("1111111111111111", "unlink");
-    await store.lifecycle("1111111111111111", "reset-profile");
+    vi.mocked(session.pollState).mockRejectedValue(new Error("offline"));
+    await store.updatePassword("1111111111111111", "new-password");
+    expect(session.pollState).toHaveBeenCalledTimes(3);
+    vi.mocked(session.pollState).mockResolvedValue();
     await store.deleteAccount("1111111111111111");
     expect((await store.checkAccount("line")).valid).toBe(true);
     expect((await store.addAccount("line")).email).toBe("new@example.test");
-    expect((await store.archiveOrphans()).archived).toBe(1);
+    expect("archiveOrphans" in store).toBe(false);
     expect(store.accountById("1111111111111111")?.email).toContain("alpha");
     expect(client.login).toHaveBeenCalledOnce();
     expect(client.unlink).toHaveBeenCalledOnce();
-    expect(client.resetProfile).toHaveBeenCalledOnce();
+    expect(client.updatePassword).toHaveBeenCalledWith(
+      "1111111111111111",
+      "new-password",
+    );
   });
 });

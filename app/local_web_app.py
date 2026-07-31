@@ -40,6 +40,12 @@ STATIC_ASSET_REFERENCE = re.compile(
 )
 
 
+class QuotaWindowState(BaseModel):
+    quota_remaining: str
+    quota_cycle: str
+    quota_reset_at: str
+
+
 class AccountState(BaseModel):
     id: str
     email: str
@@ -48,6 +54,7 @@ class AccountState(BaseModel):
     quota_remaining: str
     quota_cycle: str
     quota_reset_at: str
+    quota_windows: list[QuotaWindowState] = Field(default_factory=list)
     plan_type: str
     account_state: str
     sync_status: str
@@ -208,7 +215,6 @@ class StateResponse(BaseModel):
     accounts: list[AccountState]
     sync_status: str
     refresh_interval_seconds: int
-    orphan_profile_count: int
     recommendation: AccountRecommendation | None
     usage_statistics: UsageStatistics
     time_sync: TimeSyncState
@@ -244,6 +250,14 @@ class SensitiveValueResponse(BaseModel):
     value: str
 
 
+class PasswordUpdateRequest(BaseModel):
+    password: str
+
+
+class PasswordUpdateResponse(BaseModel):
+    updated: bool
+
+
 class DeleteResponse(BaseModel):
     deleted: bool
 
@@ -259,10 +273,6 @@ class RefreshRequest(BaseModel):
 
 class ActionResponse(BaseModel):
     accepted: bool
-
-
-class ArchiveProfilesResponse(BaseModel):
-    archived: int
 
 
 class HealthResponse(BaseModel):
@@ -601,6 +611,11 @@ def create_app(
                 status_code=404,
                 detail="Không tìm thấy tài khoản.",
             ) from error
+        except (OSError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể xóa tài khoản an toàn.",
+            ) from error
 
         return DeleteResponse(deleted=True)
 
@@ -625,6 +640,35 @@ def create_app(
             ) from error
 
         return SensitiveValueResponse(value=value)
+
+    @app.patch(
+        "/api/accounts/{account_id}/password",
+        response_model=PasswordUpdateResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def update_password(
+        account_id: str,
+        request: PasswordUpdateRequest,
+    ) -> PasswordUpdateResponse:
+        try:
+            active_service.update_password(account_id, request.password)
+        except AccountNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Không tìm thấy tài khoản.",
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
+        except OSError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể cập nhật mật khẩu an toàn.",
+            ) from error
+
+        return PasswordUpdateResponse(updated=True)
 
     @app.post(
         "/api/codex/refresh",
@@ -688,41 +732,6 @@ def create_app(
                 detail="Không thể ngắt liên kết profile an toàn.",
             ) from error
         return ActionResponse(accepted=True)
-
-    @app.post(
-        "/api/codex/{account_id}/reset-profile",
-        response_model=ActionResponse,
-        dependencies=[Depends(require_csrf)],
-    )
-    def reset_codex_profile(account_id: str) -> ActionResponse:
-        try:
-            active_service.reset_profile(account_id)
-        except AccountNotFoundError as error:
-            raise HTTPException(
-                status_code=404,
-                detail="Không tìm thấy tài khoản.",
-            ) from error
-        except (OSError, UnsafeProfilePathError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail="Không thể đặt lại profile an toàn.",
-            ) from error
-        return ActionResponse(accepted=True)
-
-    @app.post(
-        "/api/profiles/orphans/archive",
-        response_model=ArchiveProfilesResponse,
-        dependencies=[Depends(require_csrf)],
-    )
-    def archive_orphan_profiles() -> ArchiveProfilesResponse:
-        try:
-            archived = active_service.archive_orphan_profiles()
-        except (OSError, UnsafeProfilePathError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail="Không thể lưu trữ profile mồ côi an toàn.",
-            ) from error
-        return ArchiveProfilesResponse(archived=archived)
 
     @app.post(
         "/api/application/shutdown",

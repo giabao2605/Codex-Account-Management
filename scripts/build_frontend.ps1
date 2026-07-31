@@ -11,7 +11,7 @@ Get-Command npm -ErrorAction Stop | Out-Null
 
 Push-Location $frontendDirectory
 try {
-    & npm ci
+    & npm ci --include=dev
     if ($LASTEXITCODE -ne 0) {
         throw "npm ci failed with exit code $LASTEXITCODE."
     }

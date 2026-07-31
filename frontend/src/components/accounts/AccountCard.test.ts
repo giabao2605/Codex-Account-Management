@@ -26,7 +26,18 @@ describe("AccountCard", () => {
     expect(wrapper.text()).toContain("Đề xuất sử dụng");
     expect(wrapper.text()).toContain("Còn 20 giây");
     expect(wrapper.get(".otp-progress").attributes("value")).toBe("20");
-    expect(wrapper.get(".quota-progress").attributes("value")).toBe("82");
+    const quotaWindows = wrapper.findAll(".quota-window");
+    expect(quotaWindows).toHaveLength(2);
+    expect(quotaWindows[0]!.text()).toContain("5 giờ");
+    expect(quotaWindows[0]!.get(".quota-progress").attributes("value")).toBe("82");
+    expect(quotaWindows[1]!.text()).toContain("Weekly");
+    expect(quotaWindows[1]!.get(".quota-progress").attributes("value")).toBe("64");
+    const quotaResets = wrapper.findAll(".quota-reset-row");
+    expect(quotaResets).toHaveLength(2);
+    expect(quotaResets[0]!.text()).toContain("5 giờ");
+    expect(quotaResets[0]!.text()).toContain("23/07 14:00");
+    expect(quotaResets[1]!.text()).toContain("Weekly");
+    expect(quotaResets[1]!.text()).toContain("28/07 09:00");
     expect(wrapper.text()).toContain("Đã đồng bộ");
     expect(wrapper.text()).toContain("23/07 14:00");
     expect(wrapper.text()).toContain("23/07 09:45");
@@ -125,9 +136,22 @@ describe("AccountCard", () => {
     expect(wrapper.get(".account-option-actions").text()).toContain("Secret");
     expect(wrapper.get(".account-option-actions").text()).toContain("Đồng bộ");
     expect(wrapper.get(".account-option-actions").text()).toContain("Ngắt liên kết");
-    expect(wrapper.get(".account-option-actions").text()).toContain("Đặt lại profile");
+    expect(wrapper.get(".account-option-actions").text()).not.toContain(
+      "Đặt lại profile",
+    );
+    expect(wrapper.find('[data-action="reset-profile"]').exists()).toBe(false);
+    expect(wrapper.get(".account-option-actions").text()).toContain(
+      "Chỉnh sửa mật khẩu",
+    );
     expect(wrapper.get(".account-option-actions").text()).toContain("Xóa tài khoản");
 
+    await wrapper.get('[data-action="edit-password"]').trigger("click");
+    expect(wrapper.emitted("editPassword")).toHaveLength(1);
+    expect(wrapper.get('[data-action="options"]').attributes("aria-expanded"))
+      .toBe("false");
+    await wrapper.get('[data-action="options"]').trigger("click");
+    await vi.dynamicImportSettled();
+    await flushPromises();
     await wrapper.get('[data-action="unlink"]').trigger("click");
     expect(wrapper.emitted("unlink")).toHaveLength(1);
     expect(wrapper.get('[data-action="options"]').attributes("aria-expanded"))

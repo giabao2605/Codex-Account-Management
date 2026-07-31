@@ -136,6 +136,7 @@ class CodexInfo:
     remaining_percent: str = "—"
     cycle: str = "—"
     reset_at: str = "—"
+    quota_windows: tuple[dict[str, str], ...] = ()
     plan_type: str = "—"
     account_state: str = "Chưa xác định"
     status: str = "Chưa liên kết"

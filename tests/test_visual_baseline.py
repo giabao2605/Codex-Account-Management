@@ -36,7 +36,7 @@ class VisualBaselineFixtureTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertEqual(payload["api_schema_version"], 6)
+        self.assertEqual(payload["api_schema_version"], 10)
         self.assertEqual(len(payload["state"]["accounts"]), 3)
         self.assertTrue(
             all(
@@ -78,9 +78,7 @@ class VisualBaselineFixtureTests(unittest.TestCase):
             ("post", "/api/codex/refresh", {"account_id": account_id}),
             ("post", f"/api/codex/{account_id}/login", None),
             ("post", f"/api/codex/{account_id}/unlink", None),
-            ("post", f"/api/codex/{account_id}/reset-profile", None),
             ("delete", f"/api/accounts/{account_id}", None),
-            ("post", "/api/profiles/orphans/archive", None),
         )
 
         action_payloads = []

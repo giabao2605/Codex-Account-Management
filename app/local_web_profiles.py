@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
-from datetime import datetime
 from pathlib import Path
 from secrets import token_hex
-
-from .otp_codex_manager_with_account_status import protect_sensitive_path
 
 
 class UnsafeProfilePathError(ValueError):
     pass
+
+
+INTERNAL_PROFILE_DIRECTORIES = {".failover"}
 
 
 def is_reparse_point(path: Path) -> bool:
@@ -49,7 +50,8 @@ def validate_direct_profile_directory(
     validate_profiles_root(profiles_dir)
     if (
         profile_dir.parent != profiles_dir
-        or profile_dir.name in {"", ".", "..", ".archived"}
+        or profile_dir.name in {"", ".", ".."}
+        or profile_dir.name in INTERNAL_PROFILE_DIRECTORIES
     ):
         raise UnsafeProfilePathError("Đường dẫn profile không hợp lệ.")
     try:
@@ -66,7 +68,70 @@ def validate_direct_profile_directory(
         raise UnsafeProfilePathError("Profile không phải thư mục an toàn.")
 
 
-def archive_profile_directory(
+def delete_profile_directory(
+    profiles_dir: Path,
+    profile_dir: Path,
+) -> bool:
+    profiles_dir = Path(profiles_dir)
+    profile_dir = Path(profile_dir)
+    validate_direct_profile_directory(profiles_dir, profile_dir)
+    try:
+        profile_dir.lstat()
+    except FileNotFoundError:
+        return False
+
+    shutil.rmtree(profile_dir)
+    return True
+
+
+def delete_staged_profile_directories(
+    profiles_dir: Path,
+    profile_dir: Path | None = None,
+) -> int:
+    profiles_dir = Path(profiles_dir)
+    validate_profiles_root(profiles_dir)
+    profile_name = None
+    if profile_dir is not None:
+        profile_dir = Path(profile_dir)
+        validate_direct_profile_directory(profiles_dir, profile_dir)
+        profile_name = profile_dir.name
+
+    candidates: list[Path] = []
+    marker = ".deleting-"
+    for candidate in profiles_dir.iterdir():
+        marker_index = candidate.name.rfind(marker)
+        original_name = candidate.name[1:marker_index]
+        token = candidate.name[marker_index + len(marker):]
+        if (
+            not candidate.name.startswith(".")
+            or marker_index <= 1
+            or len(token) != 16
+            or any(character not in "0123456789abcdef" for character in token)
+            or (profile_name is not None and original_name != profile_name)
+        ):
+            continue
+        validate_direct_profile_directory(
+            profiles_dir,
+            profiles_dir / original_name,
+        )
+        candidates.append(candidate)
+
+    first_error: Exception | None = None
+    deleted = 0
+    for candidate in candidates:
+        try:
+            deleted += int(
+                delete_profile_directory(profiles_dir, candidate)
+            )
+        except (OSError, UnsafeProfilePathError) as error:
+            first_error = first_error or error
+
+    if first_error is not None:
+        raise first_error
+    return deleted
+
+
+def stage_profile_directory_for_deletion(
     profiles_dir: Path,
     profile_dir: Path,
 ) -> Path | None:
@@ -78,49 +143,24 @@ def archive_profile_directory(
     except FileNotFoundError:
         return None
 
-    archived_dir = profiles_dir / ".archived"
-    archived_dir.mkdir(parents=True, exist_ok=True)
-    if is_reparse_point(archived_dir):
-        raise UnsafeProfilePathError("Kho lưu trữ profile không an toàn.")
-    protect_sensitive_path(archived_dir)
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    destination = archived_dir / (
-        f"{profile_dir.name}-{timestamp}-{token_hex(4)}"
+    staged_dir = profiles_dir / (
+        f".{profile_dir.name}.deleting-{token_hex(8)}"
     )
-    os.replace(profile_dir, destination)
-    destination_metadata = destination.lstat()
-    if (
-        destination.parent != archived_dir
-        or is_reparse_point(destination)
-        or not stat.S_ISDIR(destination_metadata.st_mode)
-    ):
-        raise UnsafeProfilePathError(
-            "Profile sau khi lưu trữ không còn là thư mục an toàn."
-        )
-    protect_sensitive_path(destination)
-    return destination
+    validate_direct_profile_directory(profiles_dir, staged_dir)
+    os.replace(profile_dir, staged_dir)
+    return staged_dir
 
 
-def list_orphan_profile_directories(
+def restore_staged_profile_directory(
     profiles_dir: Path,
-    active_profile_names: set[str],
-) -> tuple[Path, ...]:
-    profiles_dir = Path(profiles_dir)
-    if not profiles_dir.exists():
-        return ()
-    validate_profiles_root(profiles_dir)
-
-    orphans: list[Path] = []
-    for candidate in profiles_dir.iterdir():
-        if (
-            candidate.name == ".archived"
-            or candidate.name in active_profile_names
-        ):
-            continue
-        try:
-            validate_direct_profile_directory(profiles_dir, candidate)
-        except (OSError, UnsafeProfilePathError):
-            continue
-        orphans.append(candidate)
-    return tuple(sorted(orphans, key=lambda path: path.name.casefold()))
+    staged_dir: Path,
+    profile_dir: Path,
+) -> None:
+    validate_direct_profile_directory(profiles_dir, staged_dir)
+    validate_direct_profile_directory(profiles_dir, profile_dir)
+    try:
+        profile_dir.lstat()
+    except FileNotFoundError:
+        os.replace(staged_dir, profile_dir)
+        return
+    raise UnsafeProfilePathError("Profile đích đã tồn tại.")

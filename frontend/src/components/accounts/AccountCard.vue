@@ -26,20 +26,34 @@ const emit = defineEmits<{
   refresh: [];
   login: [];
   unlink: [];
-  resetProfile: [];
+  editPassword: [];
   delete: [];
 }>();
 const optionsOpen = ref(false);
 const optionsId = `account-options-${useId()}`;
 const optionsMorphId = `account-options-${props.account.id}`;
 
-const quotaPercent = computed(() => (
-  parseQuotaPercent(props.account.quota_remaining)
-));
+const quotaWindows = computed(() => {
+  const windows = props.account.quota_windows.length > 0
+    ? props.account.quota_windows
+    : [{
+        quota_remaining: props.account.quota_remaining,
+        quota_cycle: props.account.quota_cycle,
+        quota_reset_at: props.account.quota_reset_at,
+      }];
+  return windows.slice(0, 2).map((window) => ({
+    ...window,
+    percent: parseQuotaPercent(window.quota_remaining),
+  }));
+});
 const quotaTone = computed(() => {
-  if (quotaPercent.value === null) return "unknown";
-  if (quotaPercent.value <= 0) return "empty";
-  if (quotaPercent.value <= 20) return "low";
+  const known = quotaWindows.value
+    .map((window) => window.percent)
+    .filter((percent): percent is number => percent !== null);
+  if (known.length === 0) return "unknown";
+  const minimum = Math.min(...known);
+  if (minimum <= 0) return "empty";
+  if (minimum <= 20) return "low";
   return "good";
 });
 const otpRemaining = computed(() => {
@@ -94,9 +108,9 @@ function unlink(): void {
   emit("unlink");
 }
 
-function resetProfile(): void {
+function editPassword(): void {
   closeOptions();
-  emit("resetProfile");
+  emit("editPassword");
 }
 
 function deleteAccount(): void {
@@ -169,23 +183,42 @@ function deleteAccount(): void {
         data-material="standard-inset"
         aria-label="Trạng thái quota"
       >
-        <div class="meter-heading">
-          <span>Quota</span>
-          <strong>{{ account.quota_remaining }}</strong>
+        <span class="quota-title">Quota</span>
+        <div class="quota-window-list">
+          <div
+            v-for="window in quotaWindows"
+            :key="`${window.quota_cycle}-${window.quota_reset_at}`"
+            class="quota-window"
+          >
+            <div class="meter-heading">
+              <small>{{ window.quota_cycle }}</small>
+              <strong>{{ window.quota_remaining }}</strong>
+            </div>
+            <progress
+              v-if="window.percent !== null"
+              class="quota-progress"
+              :value="window.percent"
+              max="100"
+              :aria-label="`Quota ${window.quota_cycle} còn ${window.quota_remaining}`"
+            />
+          </div>
         </div>
-        <progress
-          v-if="quotaPercent !== null"
-          class="quota-progress"
-          :value="quotaPercent"
-          max="100"
-        />
-        <small>{{ account.quota_cycle }}</small>
       </section>
     </div>
 
     <dl class="account-sync-details">
       <div><dt>Đồng bộ</dt><dd>{{ account.sync_status }}</dd></div>
-      <div><dt>Đặt lại quota</dt><dd>{{ account.quota_reset_at }}</dd></div>
+      <div class="quota-reset-details">
+        <dt>Đặt lại quota</dt>
+        <dd
+          v-for="window in quotaWindows"
+          :key="`${window.quota_cycle}-${window.quota_reset_at}`"
+          class="quota-reset-row"
+        >
+          <span>{{ window.quota_cycle }}</span>
+          <strong>{{ window.quota_reset_at }}</strong>
+        </dd>
+      </div>
       <div><dt>Lần đồng bộ cuối</dt><dd>{{ account.last_sync }}</dd></div>
     </dl>
 
@@ -282,11 +315,10 @@ function deleteAccount(): void {
           </SurfaceActionButton>
           <SurfaceActionButton
             role="menuitem"
-            data-action="reset-profile"
-            :busy="isBusy('reset-profile')"
-            @click="resetProfile"
+            data-action="edit-password"
+            @click="editPassword"
           >
-            Đặt lại profile
+            Chỉnh sửa mật khẩu
           </SurfaceActionButton>
           <SurfaceActionButton
             tone="danger"

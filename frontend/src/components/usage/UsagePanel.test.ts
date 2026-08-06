@@ -114,6 +114,34 @@ describe("UsagePanel", () => {
     expect(wrapper.find(".all-account-statistics").exists()).toBe(false);
   });
 
+  it("renders yesterday from daily buckets instead of today's total", async () => {
+    const { wrapper } = mountPanel();
+    await flushPromises();
+    const usage = useUsageStore();
+    if (!usage.data) throw new Error("Expected loaded usage fixture");
+    usage.data = {
+      ...usage.data,
+      generated_at: "2026-08-01T10:47:25+07:00",
+      aggregate: {
+        ...usage.data.aggregate,
+        totals: { ...usage.data.aggregate.totals, today: 0 },
+        daily_buckets: [{ start_date: "2026-07-31", tokens: 31 }],
+      },
+      accounts: usage.data.accounts.map((account) => ({
+        ...account,
+        today: 0,
+        daily_buckets: [{ start_date: "2026-07-31", tokens: 31 }],
+      })),
+    };
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get(".all-token-total strong").text()).toBe("31");
+    usage.selectedAccountId = "1111111111111111";
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get(".token-kpis .usage-metric-card strong").text())
+      .toBe("31");
+  });
+
   it("renders a deterministic zero heatmap and supports roving keyboard focus", async () => {
     const { wrapper } = mountPanel();
     await flushPromises();

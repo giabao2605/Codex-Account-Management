@@ -890,9 +890,10 @@ select { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); borde
 .usage-table td {
   padding: 11px 10px;
   border-bottom: 1px solid var(--line);
-  text-align: left;
+  text-align: center;
   vertical-align: middle;
 }
+.usage-table .usage-account-email { text-align: left; }
 .usage-table th { color: var(--muted); font-size: .69rem; letter-spacing: .025em; text-transform: uppercase; }
 .usage-table tbody tr { transition: background-color 180ms ease; }
 .usage-table tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 48%, transparent); }

@@ -171,6 +171,12 @@ test("restores all-account and single-account usage parity", async ({ page }) =>
     .toBeVisible();
   await expect(usageTable.getByText("gamma@example.test", { exact: true }))
     .toBeVisible();
+  const alignments = async (selector: string) => usageTable.locator(selector)
+    .evaluateAll((cells) => [...new Set(cells.map(
+      (cell) => getComputedStyle(cell).textAlign,
+    ))]);
+  expect(await alignments("th, td:not(:first-child)")).toEqual(["center"]);
+  expect(await alignments("td:first-child")).toEqual(["left"]);
 
   const dailyCells = page.locator(".heat-cell");
   await expect.poll(() => dailyCells.count()).toBeGreaterThanOrEqual(365);

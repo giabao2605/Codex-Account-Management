@@ -134,6 +134,7 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
   const usageTab = page.getByRole("tab", { name: "Sử dụng" });
   await usageTab.click();
   await expect(page.locator("section[aria-label='Sử dụng token']")).toBeVisible();
+  await expect(page.locator("#usage-panel")).toHaveCSS("opacity", "1");
   await expect.poll(() => page.locator(".heat-cell").count())
     .toBeGreaterThanOrEqual(365);
   await page.getByRole("button", { name: "Tuần" }).click();

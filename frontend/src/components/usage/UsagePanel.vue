@@ -64,7 +64,7 @@ const accountScopeOptions = computed(() => [
     label: account.email,
   })),
 ]);
-const yesterdayLabel = computed(() => {
+const yesterdayDate = computed(() => {
   const generatedDate = usage.data?.generated_at.slice(0, 10);
   const [year, month, day] = generatedDate?.split("-").map(Number) ?? [];
   const now = new Date();
@@ -72,15 +72,26 @@ const yesterdayLabel = computed(() => {
     ? new Date(Date.UTC(year, month - 1, day))
     : new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
   date.setUTCDate(date.getUTCDate() - 1);
+  return date;
+});
+const yesterdayLabel = computed(() => {
+  const date = yesterdayDate.value;
   return `Hôm qua · ${String(date.getUTCDate()).padStart(2, "0")}/${String(
     date.getUTCMonth() + 1,
   ).padStart(2, "0")}/${date.getUTCFullYear()}`;
 });
+const yesterdayTokens = computed(() => {
+  if (usage.selectedBuckets === null) return null;
+  const date = yesterdayDate.value.toISOString().slice(0, 10);
+  return usage.selectedBuckets.find(
+    (bucket) => bucket.start_date === date,
+  )?.tokens ?? 0;
+});
 const allTotalCards = computed(() => [
-  { key: "today", label: yesterdayLabel.value },
-  { key: "week", label: "Tuần này" },
-  { key: "month", label: "Tháng này" },
-  { key: "lifetime", label: "Lifetime" },
+  { key: "yesterday", label: yesterdayLabel.value, value: yesterdayTokens.value },
+  { key: "week", label: "Tuần này", value: usage.data?.aggregate.totals.week },
+  { key: "month", label: "Tháng này", value: usage.data?.aggregate.totals.month },
+  { key: "lifetime", label: "Lifetime", value: usage.data?.aggregate.totals.lifetime },
 ] as const);
 
 const heatmapEndDate = computed(() => resolveHeatmapEndDate(
@@ -322,7 +333,7 @@ onMounted(() => {
       aria-label="Chỉ số sử dụng tài khoản"
     >
       <article class="usage-metric-card solid-content-card standard-surface" data-material="standard">
-        <span>{{ yesterdayLabel }}</span><strong>{{ formatNumber(usage.selectedTokenAccount?.today) }}</strong>
+        <span>{{ yesterdayLabel }}</span><strong>{{ formatNumber(yesterdayTokens) }}</strong>
       </article>
       <article class="usage-metric-card solid-content-card standard-surface" data-material="standard">
         <span>Tuần này</span><strong>{{ formatNumber(usage.selectedTokenAccount?.week) }}</strong>
@@ -491,7 +502,7 @@ onMounted(() => {
           data-material="standard"
         >
           <span>{{ card.label }}</span>
-          <strong>{{ formatNumber(usage.data?.aggregate.totals[card.key]) }}</strong>
+          <strong>{{ formatNumber(card.value) }}</strong>
         </article>
       </div>
 

@@ -214,7 +214,7 @@ class LocalWebApiTests(unittest.TestCase):
         content = baseline_path.read_text(encoding="utf-8")
 
         for expected in (
-            "API_SCHEMA_VERSION = 10",
+            "API_SCHEMA_VERSION = 11",
             "TokenUsageResponse.schema_version = 2",
             "/api/usage/tokens",
             "Authorization: Bearer <session token>",
@@ -431,6 +431,50 @@ class LocalWebApiTests(unittest.TestCase):
             self.assertEqual(
                 unauthenticated_client.get("/api/health").status_code,
                 200,
+            )
+        finally:
+            unauthenticated_client.close()
+
+    def test_failover_status_requires_auth_and_returns_only_safe_summary(
+        self,
+    ) -> None:
+        response = self.client.get("/api/failover/status")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            set(response.json()),
+            {
+                "schema_version",
+                "available",
+                "enabled",
+                "state",
+                "updated_at",
+                "has_error",
+                "tasks",
+                "quotas",
+            },
+        )
+        self.assertEqual(response.json()["state"], "disabled")
+        self.assertFalse(response.json()["available"])
+        self.assertEqual(response.json()["tasks"]["total"], 0)
+        self.assertNotIn("last_error", response.text)
+        self.assertNotIn("cwd", response.text)
+        self.assertNotIn("session_id", response.text)
+        self.assertFalse(
+            (self.service.profiles_dir / ".failover").exists()
+        )
+
+        unauthenticated_client = TestClient(
+            create_app(self.service),
+            base_url="http://127.0.0.1",
+            client=("127.0.0.1", 51004),
+        )
+        try:
+            self.assertEqual(
+                unauthenticated_client.get(
+                    "/api/failover/status"
+                ).status_code,
+                401,
             )
         finally:
             unauthenticated_client.close()
@@ -946,9 +990,8 @@ class LocalWebApiTests(unittest.TestCase):
                 ),
             }
 
-        recommendation = self.client.get("/api/state").json()[
-            "recommendation"
-        ]
+        state = self.client.get("/api/state").json()
+        recommendation = state["recommendation"]
 
         self.assertEqual(recommendation["email"], "high@example.com")
         self.assertEqual(
@@ -956,6 +999,16 @@ class LocalWebApiTests(unittest.TestCase):
             self.service.account_id("high@example.com"),
         )
         self.assertEqual(recommendation["quota_remaining"], "85%")
+        self.assertEqual(
+            [item["email"] for item in state["recommendation_queue"]],
+            ["high@example.com", "low@example.com"],
+        )
+        self.assertEqual(state["recommendation_queue"][0]["rank"], 1)
+        self.assertIn("85%", state["recommendation_queue"][0]["reason"])
+        self.assertNotIn(
+            "attention@example.com",
+            [item["email"] for item in state["recommendation_queue"]],
+        )
 
     def test_recommendation_uses_earlier_reset_as_quota_tie_breaker(
         self,

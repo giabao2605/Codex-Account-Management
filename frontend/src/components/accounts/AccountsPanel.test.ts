@@ -34,8 +34,10 @@ describe("AccountsPanel", () => {
       (option) => option.attributes("value") === "quota-unknown",
     )!.setValue();
     expect(useAccountsStore().filter).toBe("quota-unknown");
-    expect(wrapper.text()).toContain("beta@example.test");
-    expect(wrapper.text()).not.toContain("alpha@example.test");
+    expect(wrapper.get(".account-grid").text()).toContain("beta@example.test");
+    expect(wrapper.get(".account-grid").text()).not.toContain(
+      "alpha@example.test",
+    );
   });
 
   it("separates standard account content from liquid action controls", () => {
@@ -61,6 +63,90 @@ describe("AccountsPanel", () => {
     expect(
       wrapper.findAll('[data-liquid-container="actions"]'),
     ).toHaveLength(2);
+  });
+
+  it("shows an explained recommendation queue and acts only on request", async () => {
+    const session = useSessionStore();
+    const state = applicationState();
+    const fallback = {
+      ...state.accounts[0]!,
+      id: "3333333333333333",
+      email: "gamma@example.test",
+      quota_remaining: "60%",
+      quota_reset_at: "23/07 10:00",
+    };
+    session.state = {
+      ...state,
+      accounts: [...state.accounts, fallback],
+      recommendation_queue: [
+        {
+          ...state.recommendation!,
+          rank: 1,
+          reason: "Hoạt động bình thường · còn 82% quota · reset 24/07 10:00",
+        },
+        {
+          account_id: fallback.id,
+          email: fallback.email,
+          quota_remaining: fallback.quota_remaining,
+          quota_reset_at: fallback.quota_reset_at,
+          rank: 2,
+          reason: "Hoạt động bình thường · còn 60% quota · reset 23/07 10:00",
+        },
+      ],
+      usage_statistics: {
+        ...state.usage_statistics,
+        next_reset_at: "23/07 10:00",
+      },
+    };
+    const accounts = useAccountsStore();
+    accounts.filter = "attention";
+    const refresh = vi.spyOn(accounts, "refresh").mockResolvedValue(true);
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const wrapper = mount(AccountsPanel, { attachTo: document.body });
+
+    const queue = wrapper.get('[aria-label="Hàng đợi tài khoản thông minh"]');
+    expect(queue.get('[data-queue-role="recommended"]').text()).toContain(
+      "alpha@example.test",
+    );
+    expect(queue.get('[data-queue-role="recommended"]').text()).toContain(
+      "82%",
+    );
+    expect(queue.get('[data-queue-role="fallback"]').text()).toContain(
+      "gamma@example.test",
+    );
+    expect(queue.text()).toContain("Reset gần nhất: 23/07 10:00");
+    expect(refresh).not.toHaveBeenCalled();
+
+    await queue.get('[data-action="focus-recommendation"]').trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(accounts.filter).toBe("all");
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    expect(document.activeElement?.id).toBe("account-1111111111111111");
+    expect(refresh).not.toHaveBeenCalled();
+
+    await queue.get('[data-action="refresh-recommendation"]').trigger("click");
+    expect(refresh).toHaveBeenCalledWith(null);
+    wrapper.unmount();
+  });
+
+  it("does not invent a recommendation when the backend has none", () => {
+    const session = useSessionStore();
+    session.state = {
+      ...applicationState(),
+      recommendation: null,
+      recommendation_queue: [],
+    };
+
+    const wrapper = mount(AccountsPanel);
+
+    expect(wrapper.get('[aria-label="Hàng đợi tài khoản thông minh"]').text())
+      .toContain("Chưa có tài khoản đủ dữ liệu để đề xuất");
+    expect(wrapper.find('[data-action="focus-recommendation"]').exists())
+      .toBe(false);
   });
 
   it("does not expose orphan profile archiving", () => {

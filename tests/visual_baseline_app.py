@@ -277,6 +277,30 @@ class VisualBaselineService:
                 "quota_remaining": "82%",
                 "quota_reset_at": "23/07 14:00",
             },
+            "recommendation_queue": [
+                {
+                    "account_id": _ACCOUNT_ROWS[0]["id"],
+                    "email": _ACCOUNT_ROWS[0]["email"],
+                    "quota_remaining": "82%",
+                    "quota_reset_at": "23/07 14:00",
+                    "rank": 1,
+                    "reason": (
+                        "Hoạt động bình thường · còn 82% quota · "
+                        "reset 23/07 14:00"
+                    ),
+                },
+                {
+                    "account_id": _ACCOUNT_ROWS[1]["id"],
+                    "email": _ACCOUNT_ROWS[1]["email"],
+                    "quota_remaining": "12%",
+                    "quota_reset_at": "23/07 12:30",
+                    "rank": 2,
+                    "reason": (
+                        "Hoạt động bình thường · còn 12% quota · "
+                        "reset 23/07 12:30"
+                    ),
+                },
+            ],
             "usage_statistics": {
                 "schema_version": 1,
                 "history_available": False,
@@ -368,6 +392,25 @@ class VisualBaselineService:
                 "series": _series(multiplier=3),
             },
             "accounts": _TOKEN_ACCOUNTS,
+        }
+
+    def failover_status(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "available": True,
+            "enabled": False,
+            "state": "disabled",
+            "updated_at": None,
+            "has_error": False,
+            "tasks": {
+                "total": 0,
+                "active": 0,
+                "completed": 0,
+                "blocked": 0,
+                "quota_exhausted": 0,
+                "eligible": 0,
+            },
+            "quotas": {"total": 0, "exhausted": 0},
         }
 
     def refresh_async(

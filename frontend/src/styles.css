@@ -201,7 +201,7 @@ h3 { font-size: 1.06rem; }
   padding: 7px;
   border-radius: 19px;
 }
-.workspace-tabs { min-width: 340px; }
+.workspace-tabs { min-width: 420px; }
 .glass-segmented-control button {
   min-height: 42px; flex: 1; border: 0; border-radius: 13px; padding: 0 16px;
   color: var(--muted); background: transparent; cursor: pointer;
@@ -305,6 +305,63 @@ h3 { font-size: 1.06rem; }
   gap: 10px;
   margin: 0 0 14px;
 }
+.account-smart-queue {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--panel-background);
+  box-shadow: var(--standard-shadow);
+}
+.account-smart-queue-heading,
+.account-queue-item,
+.account-queue-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.account-smart-queue-heading p,
+.account-queue-item p,
+.account-queue-empty { margin: 0; }
+.account-queue-item {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-raised);
+}
+.account-queue-item.is-recommended {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.account-queue-item p,
+.account-queue-summary,
+.account-queue-empty {
+  color: var(--muted);
+  font-size: .84rem;
+}
+.account-queue-summary { justify-content: flex-start; flex-wrap: wrap; }
+.failover-shell { display: grid; gap: 14px; }
+.failover-privacy-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: .88rem;
+  line-height: 1.5;
+}
+.failover-state-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+.failover-state-card > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.failover-state-card p,
+.failover-state-card > span { margin: 0; color: var(--muted); }
+.failover-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .account-filter-control { min-width: 190px; }
 .account-filter-control .glass-select-label { display: none; }
 .account-grid {
@@ -935,7 +992,11 @@ textarea {
   .panel-heading, .usage-controls { align-items: stretch; flex-direction: column; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .accounts-heading-main { flex-wrap: wrap; }
+  .account-smart-queue-heading,
+  .account-queue-item { align-items: stretch; flex-direction: column; }
   .quota-summary { grid-template-columns: 1fr 1fr; }
+  .workspace-tabs { min-width: 360px; }
+  .failover-metrics { grid-template-columns: 1fr 1fr; }
   .quota-primary-card { grid-column: 1 / -1; }
 }
 @media (max-width: 440px) {

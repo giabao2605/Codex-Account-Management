@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 
+import { userFacingError } from "@/api/client.ts";
 import type { TokenUsageResponse } from "@/types/api.ts";
 import type { HeatmapMode } from "@/utils/heatmap.ts";
 import { useSessionStore } from "./session.ts";
@@ -75,10 +76,14 @@ export const useUsageStore = defineStore("usage", () => {
         data.value = payload;
         fetchedAt.value = Date.now();
       })
-      .catch(() => {
-        errorMessage.value = data.value
+      .catch((error) => {
+        const fallback = data.value
           ? "Không thể làm mới; đang hiển thị dữ liệu cũ."
           : "Chưa thể tải dữ liệu token.";
+        const detail = userFacingError(error, fallback);
+        errorMessage.value = data.value && detail !== fallback
+          ? `${detail} Đang hiển thị dữ liệu cũ.`
+          : detail;
       })
       .finally(() => {
         if (inFlight === request) inFlight = null;

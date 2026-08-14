@@ -7,7 +7,7 @@ Phase 1 khóa trạng thái frontend/backend hiện tại trước khi scaffold 
 ## Baseline kỹ thuật
 
 - Branch hiện tại: `main`, commit gốc đang checkout: `b8d87ff`, working tree có thay đổi chưa commit.
-- Backend contract hiện tại: `API_SCHEMA_VERSION = 10`.
+- Backend contract hiện tại: `API_SCHEMA_VERSION = 11`.
 - Token usage contract hiện tại: `TokenUsageResponse.schema_version = 2`, `source = "codex_account_usage"`.
 - Frontend hiện tại vẫn là vanilla HTML/CSS/JS trong `web/`; chưa có `frontend/`, Vite, Vue, Pinia, hoặc Playwright trong baseline.
 - Build fingerprint hiện tính từ runtime Python, local web service, token usage module, và các asset `web/`.
@@ -65,7 +65,8 @@ Visual fixture xác nhận ba account states, nullable OTP, recommendation, toke
 | --- | --- | --- | --- |
 | `/api/health` | GET | Public local health, trả `status`, `api_schema_version`, `build_id`. | `test_security_headers_and_local_health` |
 | `/api/bootstrap` | GET | Authenticated bootstrap, trả CSRF token và state ban đầu. | `test_security_headers_and_local_health`, `test_api_state_requires_launch_session_token` |
-| `/api/state` | GET | Authenticated state gồm accounts, recommendation, usage statistics, time sync. | `test_state_recommends_valid_account_with_highest_quota`, `test_state_reports_usage_statistics_per_account_and_totals` |
+| `/api/state` | GET | Authenticated state gồm accounts, hàng đợi recommendation, usage statistics, time sync. | `test_state_recommends_valid_account_with_highest_quota`, `test_state_reports_usage_statistics_per_account_and_totals` |
+| `/api/failover/status` | GET | Trạng thái failover chỉ đọc, chỉ trả metadata tổng hợp và không trả task/profile/runtime path. | `test_failover_status_requires_auth_and_returns_only_safe_summary`, `test_public_summary_exposes_counts_without_task_metadata` |
 | `/api/usage/tokens` | GET | Authenticated token usage schema v2, coverage, periods, aggregate, per-account stats. | `test_token_usage_endpoint_requires_auth_and_returns_safe_data`, `tests/test_token_usage.py` |
 | `/api/accounts/import/preview` | POST | CSRF-protected preview, không ghi file, redacts credentials. | `test_import_preview_is_read_only_and_redacts_credentials` |
 | `/api/accounts/import` | POST | CSRF-protected apply bằng preview token, reject stale/tamper. | `test_import_requires_preview_token_and_rejects_tampering`, `test_import_rejects_stale_preview_token` |

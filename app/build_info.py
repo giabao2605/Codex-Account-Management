@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Protocol
 
 
-API_SCHEMA_VERSION = 10
+API_SCHEMA_VERSION = 11
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -17,6 +17,8 @@ CORE_BUILD_INPUTS = (
     "run_local_web.py",
     "app/build_info.py",
     "app/codex_sync.py",
+    "app/codex_failover.py",
+    "app/codex_failover_hook.py",
     "app/local_web_accounts.py",
     "app/local_web_app.py",
     "app/local_web_profiles.py",

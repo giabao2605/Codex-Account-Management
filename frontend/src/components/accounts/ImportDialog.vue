@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
+import { userFacingError } from "@/api/client.ts";
 import GlassDialog from "@/components/glass/GlassDialog.vue";
 import SurfaceActionButton from "@/components/glass/SurfaceActionButton.vue";
 import { useAccountsStore } from "@/stores/accounts.ts";
@@ -17,6 +18,7 @@ const checking = ref(false);
 const saving = ref(false);
 const error = ref("");
 let checkRequestId = 0;
+let checkTimer: number | undefined;
 
 const busy = computed(() => checking.value || saving.value);
 const addDisabled = computed(() => (
@@ -35,6 +37,8 @@ const statusState = computed(() => {
 });
 
 function resetDialog(): void {
+  window.clearTimeout(checkTimer);
+  checkTimer = undefined;
   checkRequestId += 1;
   line.value = "";
   check.value = null;
@@ -54,15 +58,17 @@ async function checkCurrentLine(value: string, requestId: number): Promise<void>
     const result = await accounts.checkAccount(value);
     if (requestId !== checkRequestId || value !== line.value) return;
     check.value = result;
-  } catch {
+  } catch (caught) {
     if (requestId !== checkRequestId) return;
-    error.value = "Không thể kiểm tra tài khoản.";
+    error.value = userFacingError(caught, "Không thể kiểm tra tài khoản.");
   } finally {
     if (requestId === checkRequestId) checking.value = false;
   }
 }
 
 watch(line, (value) => {
+  window.clearTimeout(checkTimer);
+  checkTimer = undefined;
   const requestId = ++checkRequestId;
   check.value = null;
   error.value = "";
@@ -71,8 +77,13 @@ watch(line, (value) => {
     return;
   }
   checking.value = true;
-  void checkCurrentLine(value, requestId);
+  checkTimer = window.setTimeout(() => {
+    checkTimer = undefined;
+    void checkCurrentLine(value, requestId);
+  }, 300);
 });
+
+onBeforeUnmount(() => window.clearTimeout(checkTimer));
 
 watch(() => props.open, (value) => {
   if (!value) resetDialog();
@@ -88,18 +99,19 @@ async function addAccount(): Promise<void> {
     feedback.success(`Đã thêm ${result.email}.`);
     saving.value = false;
     closeDialog();
-  } catch {
+  } catch (caught) {
+    const addError = userFacingError(caught, "Không thể thêm tài khoản.");
     const requestId = ++checkRequestId;
     check.value = null;
     try {
       const result = await accounts.checkAccount(requestedLine);
       if (requestId === checkRequestId) {
         check.value = result;
-        error.value = result.valid ? "Không thể thêm tài khoản." : "";
+        error.value = result.valid ? addError : "";
       }
-    } catch {
+    } catch (recheckError) {
       if (requestId === checkRequestId) {
-        error.value = "Không thể thêm tài khoản.";
+        error.value = userFacingError(recheckError, addError);
       }
     }
     feedback.error(error.value || check.value?.message || "Không thể thêm tài khoản.");

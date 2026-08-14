@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { LocalApiClient } from "./client.ts";
+import { ApiError, LocalApiClient, userFacingError } from "./client.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -68,6 +68,48 @@ describe("LocalApiClient", () => {
     );
   });
 
+  it("uses a bounded error detail only when it comes from the local app", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ detail: "Không tìm thấy tài khoản." }),
+          {
+            status: 404,
+            headers: {
+              "Content-Type": "application/json",
+              "X-OTP-Codex-App": "1",
+            },
+          },
+        ))
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ detail: "SENTINEL untrusted detail" }),
+          {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          },
+        )),
+    );
+    const client = new LocalApiClient("access-token", () => "csrf-token");
+
+    await expect(client.deleteAccount("missing")).rejects.toEqual(
+      expect.objectContaining({ message: "Không tìm thấy tài khoản." }),
+    );
+    await expect(client.deleteAccount("missing")).rejects.toEqual(
+      expect.objectContaining({
+        message: "Không thể kết nối ứng dụng local.",
+      }),
+    );
+    expect(userFacingError(
+      new ApiError("Thao tác quá nhanh.", 429),
+      "Không thể hoàn tất.",
+    )).toBe("Thao tác quá nhanh.");
+    expect(userFacingError(
+      new Error("SENTINEL internal"),
+      "Không thể hoàn tất.",
+    )).toBe("Không thể hoàn tất.");
+  });
+
   it("maps every Phase 3 endpoint through the centralized client", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ accepted: true }), {
@@ -80,6 +122,7 @@ describe("LocalApiClient", () => {
 
     await client.state();
     await client.tokenUsage();
+    await client.failoverStatus();
     await client.checkAccount("alpha@example.test|password|secret");
     await client.addAccount("alpha@example.test|password|secret");
     await client.sensitiveValue("1111111111111111", "password");
@@ -95,6 +138,7 @@ describe("LocalApiClient", () => {
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       "/api/state",
       "/api/usage/tokens",
+      "/api/failover/status",
       "/api/accounts/import/check",
       "/api/accounts/import",
       "/api/accounts/1111111111111111/sensitive",
@@ -113,7 +157,11 @@ describe("LocalApiClient", () => {
       body: JSON.stringify({ password: "new-password" }),
     }));
 
-    const mutationCalls = fetchMock.mock.calls.slice(2);
+    const mutationCalls = fetchMock.mock.calls.filter(([, init]) => (
+      !["GET", "HEAD", "OPTIONS"].includes(
+        String((init as RequestInit).method ?? "GET").toUpperCase(),
+      )
+    ));
     expect(
       mutationCalls.every(([, init]) => (
         new Headers((init as RequestInit).headers).get("X-CSRF-Token")

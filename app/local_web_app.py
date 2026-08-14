@@ -68,6 +68,11 @@ class AccountRecommendation(BaseModel):
     quota_reset_at: str
 
 
+class RankedAccountRecommendation(AccountRecommendation):
+    rank: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=200)
+
+
 class AccountUsageStatistics(BaseModel):
     account_id: str
     email: str
@@ -211,11 +216,47 @@ class TimeSyncState(BaseModel):
     source_count: int
 
 
+class FailoverTaskCounts(BaseModel):
+    total: int = Field(ge=0)
+    active: int = Field(ge=0)
+    completed: int = Field(ge=0)
+    blocked: int = Field(ge=0)
+    quota_exhausted: int = Field(ge=0)
+    eligible: int = Field(ge=0)
+
+
+class FailoverQuotaCounts(BaseModel):
+    total: int = Field(ge=0)
+    exhausted: int = Field(ge=0)
+
+
+class FailoverStatusResponse(BaseModel):
+    schema_version: Literal[1]
+    available: bool
+    enabled: bool
+    state: Literal[
+        "disabled",
+        "observing",
+        "draining",
+        "switching",
+        "resuming",
+        "running",
+        "all_exhausted",
+        "blocked",
+        "error",
+    ]
+    updated_at: str | None
+    has_error: bool
+    tasks: FailoverTaskCounts
+    quotas: FailoverQuotaCounts
+
+
 class StateResponse(BaseModel):
     accounts: list[AccountState]
     sync_status: str
     refresh_interval_seconds: int
     recommendation: AccountRecommendation | None
+    recommendation_queue: list[RankedAccountRecommendation]
     usage_statistics: UsageStatistics
     time_sync: TimeSyncState
 
@@ -559,6 +600,15 @@ def create_app(
     def token_usage() -> TokenUsageResponse:
         return TokenUsageResponse.model_validate(
             active_service.token_usage_statistics()
+        )
+
+    @app.get(
+        "/api/failover/status",
+        response_model=FailoverStatusResponse,
+    )
+    def failover_status() -> FailoverStatusResponse:
+        return FailoverStatusResponse.model_validate(
+            active_service.failover_status()
         )
 
     @app.post(

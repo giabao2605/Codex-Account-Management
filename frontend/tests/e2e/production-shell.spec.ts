@@ -115,13 +115,17 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
     return lens
       ? lens.getBoundingClientRect().width / element.getBoundingClientRect().width
       : 0;
-  })).toBeCloseTo(0.5, 1);
+  })).toBeCloseTo(1 / 3, 1);
 
   await page.getByRole("button", { name: /Lọc tài khoản/ }).click();
   await page.getByRole("dialog", { name: "Lọc tài khoản" })
     .getByLabel("Cần chú ý").check();
-  await expect(page.getByText("gamma@example.test", { exact: true })).toBeVisible();
-  await expect(page.getByText("alpha@example.test", { exact: true })).toBeHidden();
+  await expect(page.locator(".account-card").filter({
+    hasText: "gamma@example.test",
+  })).toBeVisible();
+  await expect(page.locator(".account-card").filter({
+    hasText: "alpha@example.test",
+  })).toBeHidden();
   await page.getByRole("button", { name: /Lọc tài khoản/ }).click();
   await page.getByRole("dialog", { name: "Lọc tài khoản" })
     .getByLabel("Tất cả", { exact: true }).check();
@@ -143,7 +147,10 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
   const accountsTab = page.getByRole("tab", { name: "Tài khoản" });
   await expect(accountsTab).toBeFocused();
   await accountsTab.press("End");
-  await expect(usageTab).toBeFocused();
+  const failoverTab = page.getByRole("tab", { name: "Failover" });
+  await expect(failoverTab).toBeFocused();
+  await expect(page.locator("#failover-panel")).toHaveCSS("opacity", "1");
+  await expect(page.getByText("Trạng thái failover", { exact: true })).toBeVisible();
   expect(await seriousAxeViolations(page)).toEqual([]);
 
   await page.getByRole("button", { name: "Giao diện" }).click();

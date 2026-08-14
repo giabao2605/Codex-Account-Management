@@ -5,6 +5,7 @@ import GlassButton from "@/components/glass/GlassButton.vue";
 import GlassPopover from "@/components/glass/GlassPopover.vue";
 import SurfaceActionButton from "@/components/glass/SurfaceActionButton.vue";
 import type { AccountAction } from "@/stores/accounts.ts";
+import { useSessionStore } from "@/stores/session.ts";
 import type { AccountState } from "@/types/api.ts";
 import {
   normalizedStatus,
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   delete: [];
 }>();
 const optionsOpen = ref(false);
+const session = useSessionStore();
 const optionsId = `account-options-${useId()}`;
 const optionsMorphId = `account-options-${props.account.id}`;
 
@@ -57,9 +59,10 @@ const quotaTone = computed(() => {
   return "good";
 });
 const otpRemaining = computed(() => {
-  const remaining = props.account.otp_remaining_seconds;
+  const remaining = session.otpRemainingSeconds(props.account);
   return remaining === null ? null : Math.max(0, Math.min(30, remaining));
 });
+const otpValue = computed(() => session.otpValue(props.account));
 const tone = computed(() => statusTone(props.account));
 const connectionStatus = computed(() => normalizedStatus(props.account));
 const isUnlinked = computed(() => (
@@ -121,10 +124,12 @@ function deleteAccount(): void {
 
 <template>
   <article
+    :id="`account-${account.id}`"
     class="account-card standard-surface"
     data-material="standard"
     data-material-role="account-card"
     :aria-label="account.email"
+    tabindex="-1"
   >
     <header class="account-card-header">
       <div class="account-identity">
@@ -155,14 +160,14 @@ function deleteAccount(): void {
             class="otp-copy-button"
             type="button"
             data-action="otp-value"
-            :disabled="account.otp === null"
-            :aria-label="account.otp === null
+            :disabled="otpValue === null"
+            :aria-label="otpValue === null
               ? `OTP của ${account.email} chưa sẵn sàng`
-              : `Sao chép mã OTP ${account.otp} của ${account.email}`"
-            :title="account.otp === null ? 'OTP chưa sẵn sàng' : 'Bấm để sao chép OTP'"
+              : `Sao chép mã OTP ${otpValue} của ${account.email}`"
+            :title="otpValue === null ? 'OTP chưa sẵn sàng' : 'Bấm để sao chép OTP'"
             @click="copyOtp"
           >
-            {{ account.otp ?? "Không khả dụng" }}
+            {{ otpValue ?? "Không khả dụng" }}
           </button>
         </div>
         <div class="otp-validity">
@@ -274,7 +279,7 @@ function deleteAccount(): void {
           <SurfaceActionButton
             role="menuitem"
             data-action="otp"
-            :disabled="account.otp === null"
+            :disabled="otpValue === null"
             @click="copyOtp"
           >
             OTP

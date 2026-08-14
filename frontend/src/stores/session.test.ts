@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./session.ts";
 import { applicationState } from "@/test/fixtures.ts";
 
-function bootstrapResponse(apiSchemaVersion = 10): Response {
+function bootstrapResponse(apiSchemaVersion = 11): Response {
   return new Response(
     JSON.stringify({
       api_schema_version: apiSchemaVersion,
@@ -39,7 +39,7 @@ describe("session store", () => {
     vi.unstubAllGlobals();
   });
 
-  it("accepts schema 10 and keeps CSRF in store memory", async () => {
+  it("accepts schema 11 and keeps CSRF in store memory", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(bootstrapResponse()));
     const store = useSessionStore();
 
@@ -128,6 +128,78 @@ describe("session store", () => {
     await store.pollState();
     expect(store.connectionStatus).toBe("offline");
     expect(store.errorMessage).not.toContain("offline");
+  });
+
+  it("ticks OTP locally and fetches state only on the bounded refresh cadence", async () => {
+    vi.useFakeTimers();
+    const state = applicationState();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        api_schema_version: 11,
+        build_id: "production-build",
+        csrf_token: "csrf-token",
+        state,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValue(new Response(JSON.stringify(state), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useSessionStore();
+    await store.bootstrap("access-token");
+    store.startPolling();
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(store.otpRemainingSeconds(store.state!.accounts[0]!)).toBe(16);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    store.stopPolling();
+  });
+
+  it("invalidates an expired OTP until the rollover state arrives", async () => {
+    vi.useFakeTimers();
+    const state = applicationState();
+    state.accounts[0] = {
+      ...state.accounts[0]!,
+      otp: "123456",
+      otp_remaining_seconds: 1,
+    };
+    let resolveState!: (value: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        api_schema_version: 11,
+        build_id: "production-build",
+        csrf_token: "csrf-token",
+        state,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => {
+        resolveState = resolve;
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useSessionStore();
+    await store.bootstrap("access-token");
+    store.startPolling();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.otpValue(store.state!.accounts[0]!)).toBeNull();
+    expect(store.otpRemainingSeconds(store.state!.accounts[0]!)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const nextState = applicationState();
+    nextState.accounts[0] = {
+      ...nextState.accounts[0]!,
+      otp: "654321",
+      otp_remaining_seconds: 30,
+    };
+    resolveState(new Response(JSON.stringify(nextState), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.otpValue(store.state!.accounts[0]!)).toBe("654321");
+    store.stopPolling();
   });
 
   it("stops polling for shutdown and accepts a closed connection", async () => {

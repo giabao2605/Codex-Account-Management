@@ -14,6 +14,11 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from .codex_failover import (
+    FailoverPersistenceError,
+    read_failover_snapshot,
+    summarize_failover_snapshot,
+)
 from .codex_sync import (
     CodexProfileSession,
     CodexReloginRequired,
@@ -305,13 +310,44 @@ class LocalWebService:
                     "last_sync": info.last_sync,
                 }
             )
+        recommendation_queue = self._recommend_accounts(rows)
         return {
             "accounts": sorted(rows, key=account_display_sort_key),
             "sync_status": sync_status,
             "refresh_interval_seconds": self.refresh_interval_seconds,
-            "recommendation": self._recommend_account(rows),
+            "recommendation": (
+                recommendation_queue[0] if recommendation_queue else None
+            ),
+            "recommendation_queue": recommendation_queue,
             "usage_statistics": self._usage_statistics(rows),
             "time_sync": time_sync,
+        }
+
+    def failover_status(self) -> dict[str, object]:
+        has_error = False
+        try:
+            snapshot = read_failover_snapshot(self.profiles_dir)
+        except (FailoverPersistenceError, OSError, ValueError):
+            snapshot = None
+            has_error = True
+        if snapshot is not None:
+            return summarize_failover_snapshot(snapshot)
+        return {
+            "schema_version": 1,
+            "available": False,
+            "enabled": False,
+            "state": "error" if has_error else "disabled",
+            "updated_at": None,
+            "has_error": has_error,
+            "tasks": {
+                "total": 0,
+                "active": 0,
+                "completed": 0,
+                "blocked": 0,
+                "quota_exhausted": 0,
+                "eligible": 0,
+            },
+            "quotas": {"total": 0, "exhausted": 0},
         }
 
     def token_usage_statistics(self) -> dict[str, object]:
@@ -660,6 +696,13 @@ class LocalWebService:
 
     @staticmethod
     def _recommend_account(rows: list[dict[str, object]]) -> dict | None:
+        recommendations = LocalWebService._recommend_accounts(rows)
+        return recommendations[0] if recommendations else None
+
+    @staticmethod
+    def _recommend_accounts(
+        rows: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
         candidates: list[tuple[float, float, str, dict[str, str]]] = []
         for row in rows:
             if str(row.get("account_state")) != "Hoạt động bình thường":
@@ -692,7 +735,24 @@ class LocalWebService:
                     },
                 )
             )
-        return min(candidates)[3] if candidates else None
+        recommendations: list[dict[str, object]] = []
+        for rank, (_, _, _, candidate) in enumerate(
+            sorted(candidates),
+            start=1,
+        ):
+            quota = candidate["quota_remaining"]
+            reset = candidate["quota_reset_at"]
+            recommendations.append(
+                {
+                    **candidate,
+                    "rank": rank,
+                    "reason": (
+                        f"Hoạt động bình thường · còn {quota} quota · "
+                        f"reset {reset}"
+                    ),
+                }
+            )
+        return recommendations
 
     @staticmethod
     def _usage_statistics(rows: list[dict[str, object]]) -> dict:

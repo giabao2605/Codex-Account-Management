@@ -5,12 +5,15 @@ import type {
   ApplicationState,
   BootstrapResponse,
   DeleteResponse,
+  FailoverStatusResponse,
   PasswordUpdateResponse,
   SensitiveValueResponse,
   TokenUsageResponse,
 } from "@/types/api.ts";
 
-export const EXPECTED_API_SCHEMA_VERSION = 10;
+export const EXPECTED_API_SCHEMA_VERSION = 11;
+const GENERIC_API_ERROR = "Không thể kết nối ứng dụng local.";
+const MAX_ERROR_DETAIL_LENGTH = 200;
 
 export class ApiError extends Error {
   constructor(
@@ -20,6 +23,10 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export function userFacingError(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
 }
 
 export class LocalApiClient {
@@ -38,6 +45,10 @@ export class LocalApiClient {
 
   async tokenUsage(): Promise<TokenUsageResponse> {
     return this.request<TokenUsageResponse>("/api/usage/tokens");
+  }
+
+  async failoverStatus(): Promise<FailoverStatusResponse> {
+    return this.request<FailoverStatusResponse>("/api/failover/status");
   }
 
   async checkAccount(lines: string): Promise<AccountCheckResponse> {
@@ -150,11 +161,33 @@ export class LocalApiClient {
         headers,
       });
     } catch {
-      throw new ApiError("Không thể kết nối ứng dụng local.", 0);
+      throw new ApiError(GENERIC_API_ERROR, 0);
     }
 
     if (!response.ok) {
-      throw new ApiError("Không thể kết nối ứng dụng local.", response.status);
+      let message = GENERIC_API_ERROR;
+      if (
+        response.headers.get("X-OTP-Codex-App") === "1"
+        && response.headers.get("Content-Type")?.includes("application/json")
+      ) {
+        try {
+          const payload = await response.clone().json() as { detail?: unknown };
+          const detail = typeof payload.detail === "string"
+            ? payload.detail.trim()
+            : "";
+          if (
+            detail.length > 0
+            && detail.length <= MAX_ERROR_DETAIL_LENGTH
+            && !detail.includes("\n")
+            && !detail.includes("\r")
+          ) {
+            message = detail;
+          }
+        } catch {
+          message = GENERIC_API_ERROR;
+        }
+      }
+      throw new ApiError(message, response.status);
     }
 
     return response.json() as Promise<T>;

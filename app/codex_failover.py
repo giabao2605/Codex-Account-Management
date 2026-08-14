@@ -175,6 +175,97 @@ def _default_snapshot() -> dict:
     }
 
 
+def summarize_failover_snapshot(snapshot: object) -> dict[str, object]:
+    clean = _validate_snapshot(snapshot)
+    task_statuses = {
+        status: sum(
+            task["status"] == status
+            for task in clean["tasks"].values()
+        )
+        for status in TASK_STATUSES
+    }
+    state = FailoverState(clean["state"])
+    return {
+        "schema_version": 1,
+        "available": True,
+        "enabled": state != FailoverState.DISABLED,
+        "state": state.value,
+        "updated_at": clean["updated_at"],
+        "has_error": state in {
+            FailoverState.BLOCKED,
+            FailoverState.ERROR,
+        },
+        "tasks": {
+            "total": len(clean["tasks"]),
+            "active": task_statuses["active"],
+            "completed": task_statuses["completed"],
+            "blocked": task_statuses["blocked"],
+            "quota_exhausted": task_statuses["quota_exhausted"],
+            "eligible": sum(
+                task["eligible"] for task in clean["tasks"].values()
+            ),
+        },
+        "quotas": {
+            "total": len(clean["quotas"]),
+            "exhausted": sum(
+                quota["exhausted"] for quota in clean["quotas"].values()
+            ),
+        },
+    }
+
+
+def read_failover_snapshot(profiles_root: Path) -> dict | None:
+    """Read the atomic registry without creating or modifying failover state."""
+    root_path = Path(profiles_root).resolve(strict=True)
+    try:
+        validate_profiles_root(root_path)
+    except (OSError, ValueError) as error:
+        raise FailoverPersistenceError(
+            "Thư mục profile không an toàn."
+        ) from error
+
+    failover_root = root_path / FAILOVER_DIR_NAME
+    try:
+        root_metadata = failover_root.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise FailoverPersistenceError(
+            "Không đọc được registry failover."
+        ) from error
+    if (
+        failover_root.parent != root_path
+        or is_reparse_point(failover_root)
+        or not stat.S_ISDIR(root_metadata.st_mode)
+    ):
+        raise FailoverPersistenceError("Registry failover không an toàn.")
+
+    registry_file = failover_root / "registry.json"
+    try:
+        metadata = registry_file.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise FailoverPersistenceError(
+            "Không đọc được registry failover."
+        ) from error
+    if (
+        registry_file.parent != failover_root
+        or is_reparse_point(registry_file)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size > MAX_REGISTRY_BYTES
+    ):
+        raise FailoverPersistenceError("Registry failover không an toàn.")
+    try:
+        return _validate_snapshot(
+            json.loads(registry_file.read_text(encoding="utf-8"))
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+        raise FailoverPersistenceError(
+            "Không đọc được registry failover."
+        ) from error
+
+
 def _validate_identifier(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not IDENTIFIER_PATTERN.fullmatch(value):
         raise ValueError(f"{field_name} không hợp lệ.")

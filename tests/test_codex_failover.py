@@ -14,7 +14,9 @@ from app.codex_failover import (
     FailoverPersistenceError,
     FailoverState,
     FailoverTransitionError,
+    read_failover_snapshot,
     sanitize_hook_event,
+    summarize_failover_snapshot,
 )
 from app.codex_failover_hook import (
     main as hook_main,
@@ -23,6 +25,65 @@ from app.codex_failover_hook import (
 
 
 class FailoverCoordinatorTests(unittest.TestCase):
+    def test_read_only_snapshot_never_creates_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profiles = Path(temp_dir) / "codex_profiles"
+            profiles.mkdir()
+
+            self.assertIsNone(read_failover_snapshot(profiles))
+            self.assertFalse((profiles / ".failover").exists())
+
+            coordinator = FailoverCoordinator(profiles)
+            coordinator.enable()
+            snapshot = read_failover_snapshot(profiles)
+
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot["state"], "observing")
+
+    def test_public_summary_exposes_counts_without_task_metadata(self) -> None:
+        summary = summarize_failover_snapshot(
+            {
+                "last_error": "SENTINEL internal error",
+                "quotas": {
+                    "private_profile_key": {
+                        "exhausted": True,
+                        "rate_limit_reached_type": "weekly",
+                        "windows": [],
+                    }
+                },
+                "sequence": 4,
+                "state": FailoverState.BLOCKED.value,
+                "tasks": {
+                    "private_session_id": {
+                        "cwd": "C:\\private\\workspace",
+                        "eligible": True,
+                        "permission_mode": "dontAsk",
+                        "session_id": "private_session_id",
+                        "status": "quota_exhausted",
+                        "turn_id": "private_turn_id",
+                    },
+                },
+                "updated_at": "2026-08-12T10:00:00+00:00",
+            }
+        )
+
+        self.assertEqual(summary["state"], "blocked")
+        self.assertEqual(summary["tasks"]["total"], 1)
+        self.assertEqual(summary["tasks"]["eligible"], 1)
+        self.assertEqual(summary["tasks"]["quota_exhausted"], 1)
+        self.assertEqual(summary["quotas"]["total"], 1)
+        self.assertEqual(summary["quotas"]["exhausted"], 1)
+        serialized = json.dumps(summary)
+        for sensitive in (
+            "SENTINEL",
+            "private_profile_key",
+            "private_session_id",
+            "private_turn_id",
+            "private\\workspace",
+            "dontAsk",
+        ):
+            self.assertNotIn(sensitive, serialized)
+
     def test_tracks_eligible_task_and_full_state_sequence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             profiles = Path(temp_dir) / "codex_profiles"

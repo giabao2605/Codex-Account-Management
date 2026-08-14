@@ -28,6 +28,11 @@ export interface AccountRecommendation {
   quota_reset_at: string;
 }
 
+export interface RankedAccountRecommendation extends AccountRecommendation {
+  rank: number;
+  reason: string;
+}
+
 export interface AccountUsageStatistics {
   account_id: string;
   email: string;
@@ -79,8 +84,41 @@ export interface ApplicationState {
   sync_status: string;
   refresh_interval_seconds: number;
   recommendation: AccountRecommendation | null;
+  recommendation_queue: RankedAccountRecommendation[];
   usage_statistics: UsageStatistics;
   time_sync: TimeSyncState;
+}
+
+export type FailoverState =
+  | "disabled"
+  | "observing"
+  | "draining"
+  | "switching"
+  | "resuming"
+  | "running"
+  | "all_exhausted"
+  | "blocked"
+  | "error";
+
+export interface FailoverStatusResponse {
+  schema_version: 1;
+  available: boolean;
+  enabled: boolean;
+  state: FailoverState;
+  updated_at: string | null;
+  has_error: boolean;
+  tasks: {
+    total: number;
+    active: number;
+    completed: number;
+    blocked: number;
+    quota_exhausted: number;
+    eligible: number;
+  };
+  quotas: {
+    total: number;
+    exhausted: number;
+  };
 }
 
 export interface BootstrapResponse {

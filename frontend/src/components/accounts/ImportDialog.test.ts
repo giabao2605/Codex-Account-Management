@@ -49,6 +49,7 @@ describe("ImportDialog", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("renders one secure account input without preview or bulk controls", () => {
@@ -80,17 +81,24 @@ describe("ImportDialog", () => {
     wrapper.unmount();
   });
 
-  it("checks while typing and enables adding only when available", async () => {
+  it("debounces checks and enables adding only when the latest value is available", async () => {
+    vi.useFakeTimers();
     const wrapper = mountDialog();
     const accounts = useAccountsStore();
     const checkAccount = vi.spyOn(accounts, "checkAccount").mockResolvedValue(
       available,
     );
 
-    await wrapper.get('input[name="account"]').setValue(accountLine);
+    const input = wrapper.get('input[name="account"]');
+    await input.setValue(accountLine.replace("alpha", "first"));
+    await input.setValue(accountLine);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(checkAccount).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     await flushPromises();
 
-    expect(checkAccount).toHaveBeenLastCalledWith(accountLine);
+    expect(checkAccount).toHaveBeenCalledOnce();
+    expect(checkAccount).toHaveBeenCalledWith(accountLine);
     expect(wrapper.get('[role="status"]').text()).toBe(available.message);
     expect(wrapper.get(".account-check-status").classes()).toContain("success");
     expect(button(wrapper, "Thêm").attributes()).not.toHaveProperty(
@@ -101,6 +109,7 @@ describe("ImportDialog", () => {
   });
 
   it("shows duplicate feedback inline and keeps adding disabled", async () => {
+    vi.useFakeTimers();
     const wrapper = mountDialog();
     const accounts = useAccountsStore();
     vi.spyOn(accounts, "checkAccount").mockResolvedValue({
@@ -110,6 +119,7 @@ describe("ImportDialog", () => {
     });
 
     await wrapper.get('input[name="account"]').setValue(accountLine);
+    await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
     expect(wrapper.get('[role="alert"]').text()).toBe("Email đã tồn tại.");
@@ -122,6 +132,7 @@ describe("ImportDialog", () => {
   });
 
   it("ignores an outdated check after the input changes", async () => {
+    vi.useFakeTimers();
     const wrapper = mountDialog();
     const accounts = useAccountsStore();
     let resolveFirst!: (value: AccountCheckResponse) => void;
@@ -136,7 +147,9 @@ describe("ImportDialog", () => {
     const input = wrapper.get('input[name="account"]');
 
     await input.setValue(accountLine);
+    await vi.advanceTimersByTimeAsync(300);
     await input.setValue(accountLine.replace("alpha", "beta"));
+    await vi.advanceTimersByTimeAsync(300);
     resolveFirst({
       valid: false,
       conflict: "email",
@@ -152,6 +165,7 @@ describe("ImportDialog", () => {
   });
 
   it("adds the checked account, clears local state, and closes", async () => {
+    vi.useFakeTimers();
     const wrapper = mountDialog();
     const accounts = useAccountsStore();
     const feedback = useFeedbackStore();
@@ -163,6 +177,7 @@ describe("ImportDialog", () => {
     const success = vi.spyOn(feedback, "success").mockImplementation(() => {});
 
     await wrapper.get('input[name="account"]').setValue(accountLine);
+    await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
     await button(wrapper, "Thêm").trigger("click");
     await flushPromises();
@@ -177,6 +192,7 @@ describe("ImportDialog", () => {
   });
 
   it("rechecks a rejected add and keeps the input for correction", async () => {
+    vi.useFakeTimers();
     const wrapper = mountDialog();
     const accounts = useAccountsStore();
     const feedback = useFeedbackStore();
@@ -191,6 +207,7 @@ describe("ImportDialog", () => {
     const showError = vi.spyOn(feedback, "error").mockImplementation(() => {});
 
     await wrapper.get('input[name="account"]').setValue(accountLine);
+    await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
     await button(wrapper, "Thêm").trigger("click");
     await flushPromises();

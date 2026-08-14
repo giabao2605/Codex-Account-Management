@@ -4,10 +4,18 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
 node_modules/
 frontend/coverage/
+frontend/.eslintcache
+frontend/playwright/.auth/
 frontend/playwright-report/
 frontend/test-results/
 
@@ -17,6 +25,10 @@ venv/
 env/
 .env
 .env.*
+!.env.example
+!.env.sample
+.npmrc
+.pypirc
 
 # Runtime data and sensitive local state
 accounts.json
@@ -31,6 +43,9 @@ auth.json
 *.key
 *.p12
 *.pfx
+*.ppk
+*.jks
+*.keystore
 *.log
 
 # Editors and operating system

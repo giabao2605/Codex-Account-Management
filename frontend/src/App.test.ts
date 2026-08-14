@@ -66,7 +66,7 @@ describe("production App", () => {
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            api_schema_version: 10,
+            api_schema_version: 11,
             build_id: "production-build",
             csrf_token: "csrf-token",
             state: {
@@ -124,6 +124,7 @@ describe("production App", () => {
     expect(wrapper.text()).not.toContain("Local account manager");
     expect(wrapper.text()).not.toContain("Quản lý local");
     const usageTab = wrapper.get("#usage-tab");
+    const failoverTab = wrapper.get("#failover-tab");
     await usageTab.trigger("click");
     expect(usageTab.attributes("aria-selected")).toBe("true");
     expect(commandLayer.attributes("data-scroll-edge")).toBe("hard");
@@ -143,10 +144,11 @@ describe("production App", () => {
     expect(document.activeElement?.id).toBe("accounts-tab");
     (accountsTab.element as HTMLElement).focus();
     await accountsTab.trigger("keydown", { key: "End" });
-    expect(usageTab.attributes("aria-selected")).toBe("true");
+    expect(failoverTab.attributes("aria-selected")).toBe("true");
     await flushPromises();
-    expect(document.activeElement?.id).toBe("usage-tab");
-    await usageTab.trigger("keydown", { key: "Enter" });
+    expect(document.activeElement?.id).toBe("failover-tab");
+    expect(wrapper.get("#failover-panel").isVisible()).toBe(true);
+    await failoverTab.trigger("keydown", { key: "Enter" });
 
     const themeButton = wrapper.get(".header-actions button");
     await themeButton.trigger("click");
@@ -181,7 +183,7 @@ describe("production App", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          api_schema_version: 10,
+          api_schema_version: 11,
           build_id: "production-build",
           csrf_token: "csrf-token",
           state: applicationState(),

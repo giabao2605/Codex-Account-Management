@@ -162,6 +162,25 @@ async function openApp(page: Page, sampleIndex: number): Promise<void> {
   await expect(page.locator(".account-card")).toHaveCount(3);
 }
 
+test("keeps the OTP countdown live while bounding state requests", async ({
+  page,
+}) => {
+  let stateRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/state") stateRequests += 1;
+  });
+  await openApp(page, 5);
+  const otpCountdown = page.locator(".account-card").first().locator(".otp-validity");
+  const initialText = await otpCountdown.textContent();
+
+  await page.waitForTimeout(2_100);
+  expect(await otpCountdown.textContent()).not.toBe(initialText);
+  await page.waitForTimeout(4_000);
+
+  expect(stateRequests).toBeGreaterThanOrEqual(1);
+  expect(stateRequests).toBeLessThanOrEqual(2);
+});
+
 async function readLoadMetrics(page: Page): Promise<LoadMetrics> {
   return page.evaluate(() => {
     const navigation = performance.getEntriesByType(

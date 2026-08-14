@@ -54,6 +54,16 @@ export function applicationState(): ApplicationState {
       quota_remaining: "82%",
       quota_reset_at: "23/07 14:00",
     },
+    recommendation_queue: [
+      {
+        account_id: "1111111111111111",
+        email: "alpha@example.test",
+        quota_remaining: "82%",
+        quota_reset_at: "23/07 14:00",
+        rank: 1,
+        reason: "Hoạt động bình thường · còn 82% quota · reset 23/07 14:00",
+      },
+    ],
     usage_statistics: {
       schema_version: 1,
       history_available: false,

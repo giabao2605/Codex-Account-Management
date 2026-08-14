@@ -13,6 +13,7 @@ import FeedbackToast from "@/components/feedback/FeedbackToast.vue";
 import GlassButton from "@/components/glass/GlassButton.vue";
 import GlassSegmentedControl from "@/components/glass/GlassSegmentedControl.vue";
 import LiquidGlassDefs from "@/components/glass/LiquidGlassDefs.vue";
+import { userFacingError } from "@/api/client.ts";
 import OfflineBanner from "@/components/feedback/OfflineBanner.vue";
 import { useFeedbackStore } from "@/stores/feedback.ts";
 import { useSessionStore } from "@/stores/session.ts";
@@ -23,6 +24,9 @@ const AccountsPanel = defineAsyncComponent(
 const UsagePanel = defineAsyncComponent(
   () => import("@/components/usage/UsagePanel.vue"),
 );
+const FailoverPanel = defineAsyncComponent(
+  () => import("@/components/failover/FailoverPanel.vue"),
+);
 const GlassLab = defineAsyncComponent(
   () => import("@/components/glass/GlassLab.vue"),
 );
@@ -30,13 +34,15 @@ const props = defineProps<{ accessToken: string }>();
 const isGlassLab = new URL(window.location.href).searchParams.get(
   "glass-lab",
 ) === "1";
-type WorkspaceTab = "accounts" | "usage";
+type WorkspaceTab = "accounts" | "usage" | "failover";
 const tabs = [
   { value: "accounts", label: "Tài khoản", id: "accounts-tab", controls: "accounts-panel" },
   { value: "usage", label: "Sử dụng", id: "usage-tab", controls: "usage-panel" },
+  { value: "failover", label: "Failover", id: "failover-tab", controls: "failover-panel" },
 ];
 const activeTab = ref<WorkspaceTab>("accounts");
 const usagePanelMounted = ref(false);
+const failoverPanelMounted = ref(false);
 const feedback = useFeedbackStore();
 const session = useSessionStore();
 const shutdownBusy = ref(false);
@@ -56,6 +62,7 @@ const connectionLabel = computed(() => ({
 
 function selectTab(tab: WorkspaceTab): void {
   if (tab === "usage") usagePanelMounted.value = true;
+  if (tab === "failover") failoverPanelMounted.value = true;
   activeTab.value = tab;
   window.dispatchEvent(new window.Event("glass-context-refresh"));
 }
@@ -69,8 +76,11 @@ async function shutdown(): Promise<void> {
   try {
     await session.shutdown();
     feedback.success("Trình quản lý đã nhận yêu cầu tắt. Bạn có thể đóng tab này.");
-  } catch {
-    feedback.error("Không thể tắt trình quản lý. Kết nối đã được khôi phục.");
+  } catch (error) {
+    feedback.error(userFacingError(
+      error,
+      "Không thể tắt trình quản lý. Kết nối đã được khôi phục.",
+    ));
   } finally {
     shutdownBusy.value = false;
   }
@@ -180,6 +190,17 @@ onBeforeUnmount(() => {
           :inert="activeTab !== 'usage'"
         >
           <UsagePanel v-if="usagePanelMounted" />
+        </section>
+        <section
+          id="failover-panel"
+          class="workspace-panel"
+          role="tabpanel"
+          aria-labelledby="failover-tab"
+          :aria-hidden="activeTab !== 'failover'"
+          :data-active="activeTab === 'failover'"
+          :inert="activeTab !== 'failover'"
+        >
+          <FailoverPanel v-if="failoverPanelMounted" />
         </section>
       </div>
     </main>

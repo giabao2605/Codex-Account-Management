@@ -39,6 +39,12 @@ test("restores the legacy account overview, filters, and card hierarchy", async 
   const alphaCard = page.getByRole("article").filter({
     hasText: "alpha@example.test",
   });
+  const betaCard = page.locator(".account-card").filter({
+    hasText: "beta@example.test",
+  });
+  const gammaCard = page.locator(".account-card").filter({
+    hasText: "gamma@example.test",
+  });
   await expect(alphaCard.getByText("Plus", { exact: true })).toBeVisible();
   await expect(alphaCard.getByText("Đề xuất sử dụng", { exact: true }))
     .toBeVisible();
@@ -59,8 +65,8 @@ test("restores the legacy account overview, filters, and card hierarchy", async 
   await page.getByRole("dialog", { name: "Lọc tài khoản" })
     .getByLabel("Quota còn", { exact: true }).check();
   await expect(alphaCard).toBeVisible();
-  await expect(page.getByText("beta@example.test", { exact: true })).toBeVisible();
-  await expect(page.getByText("gamma@example.test", { exact: true })).toBeHidden();
+  await expect(betaCard).toBeVisible();
+  await expect(gammaCard).toBeHidden();
 
   await alphaCard.getByRole("button", { name: "Tùy chọn" }).click();
   await expect(alphaCard.getByRole("menuitem", { name: /Đồng bộ/ })).toBeVisible();

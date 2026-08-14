@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 
+import { userFacingError } from "@/api/client.ts";
 import GlassButton from "@/components/glass/GlassButton.vue";
 import GlassDialog from "@/components/glass/GlassDialog.vue";
 import GlassSelectPopover from "@/components/glass/GlassSelectPopover.vue";
@@ -22,6 +23,16 @@ const passwordAccount = ref<AccountState | null>(null);
 const updatedPassword = ref("");
 const passwordSaving = ref(false);
 const importMorphId = "import-account-dialog";
+const recommendationQueue = computed(() => (
+  session.state?.recommendation_queue ?? []
+));
+const recommendation = computed(() => recommendationQueue.value[0] ?? null);
+const fallbackRecommendation = computed(() => (
+  recommendationQueue.value[1] ?? null
+));
+const nextReset = computed(() => (
+  session.state?.usage_statistics.next_reset_at ?? "Chưa rõ"
+));
 const actionTypes: AccountAction[] = [
   "refresh",
   "login",
@@ -53,8 +64,8 @@ async function copy(value: string | null, label: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(value);
     feedback.success(`Đã sao chép ${label}.`);
-  } catch {
-    feedback.error(`Không thể sao chép ${label}.`);
+  } catch (error) {
+    feedback.error(userFacingError(error, `Không thể sao chép ${label}.`));
   }
 }
 
@@ -67,8 +78,8 @@ async function copySensitive(
     const transientValue = await accounts.sensitiveValue(account.id, field);
     await navigator.clipboard.writeText(transientValue);
     feedback.success(`Đã sao chép ${label}.`);
-  } catch {
-    feedback.error(`Không thể sao chép ${label}.`);
+  } catch (error) {
+    feedback.error(userFacingError(error, `Không thể sao chép ${label}.`));
   }
 }
 
@@ -82,8 +93,8 @@ async function refresh(accountId: string | null): Promise<void> {
     } else {
       feedback.error("Không thể bắt đầu làm mới tài khoản.");
     }
-  } catch {
-    feedback.error("Không thể làm mới tài khoản.");
+  } catch (error) {
+    feedback.error(userFacingError(error, "Không thể làm mới tài khoản."));
   }
 }
 
@@ -105,8 +116,11 @@ async function lifecycle(
       ? "Đã mở quy trình đăng nhập."
       : "Đã bỏ liên kết và xóa profile Codex local.";
     feedback.success(message);
-  } catch {
-    feedback.error("Không thể cập nhật profile tài khoản.");
+  } catch (error) {
+    feedback.error(userFacingError(
+      error,
+      "Không thể cập nhật profile tài khoản.",
+    ));
   }
 }
 
@@ -117,8 +131,8 @@ async function remove(account: AccountState): Promise<void> {
   try {
     await accounts.deleteAccount(account.id);
     feedback.success("Đã xóa tài khoản.");
-  } catch {
-    feedback.error("Không thể xóa tài khoản.");
+  } catch (error) {
+    feedback.error(userFacingError(error, "Không thể xóa tài khoản."));
   }
 }
 
@@ -144,11 +158,21 @@ async function savePassword(): Promise<void> {
     feedback.success("Đã cập nhật mật khẩu đã lưu.");
     updatedPassword.value = "";
     passwordAccount.value = null;
-  } catch {
-    feedback.error("Không thể cập nhật mật khẩu.");
+  } catch (error) {
+    feedback.error(userFacingError(error, "Không thể cập nhật mật khẩu."));
   } finally {
     passwordSaving.value = false;
   }
+}
+
+async function focusRecommendation(): Promise<void> {
+  const accountId = recommendation.value?.account_id;
+  if (!accountId) return;
+  accounts.filter = "all";
+  await nextTick();
+  const card = document.getElementById(`account-${accountId}`);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  card?.focus({ preventScroll: true });
 }
 
 </script>
@@ -186,6 +210,62 @@ async function savePassword(): Promise<void> {
         </ImportDialog>
       </div>
     </div>
+    <section
+      class="account-smart-queue standard-surface"
+      data-material="standard"
+      aria-label="Hàng đợi tài khoản thông minh"
+    >
+      <div class="account-smart-queue-heading">
+        <div>
+          <p class="data-label">Hàng đợi tài khoản thông minh</p>
+          <h3 v-if="recommendation">Nên dùng lúc này</h3>
+          <h3 v-else>Chưa có đề xuất</h3>
+        </div>
+        <GlassButton
+          variant="quiet"
+          data-action="refresh-recommendation"
+          :busy="accounts.isBusy('all-accounts', 'refresh')"
+          @click="refresh(null)"
+        >
+          Đánh giá lại
+        </GlassButton>
+      </div>
+      <div
+        v-if="recommendation"
+        class="account-queue-item is-recommended"
+        data-queue-role="recommended"
+      >
+        <div>
+          <strong>{{ recommendation.email }}</strong>
+          <p>{{ recommendation.reason }}</p>
+        </div>
+        <GlassButton
+          variant="lite"
+          data-action="focus-recommendation"
+          @click="focusRecommendation"
+        >
+          Xem tài khoản
+        </GlassButton>
+      </div>
+      <p v-else class="account-queue-empty">
+        Chưa có tài khoản đủ dữ liệu để đề xuất. Hãy đồng bộ lại trạng thái.
+      </p>
+      <div
+        v-if="fallbackRecommendation"
+        class="account-queue-item"
+        data-queue-role="fallback"
+      >
+        <span>Dự phòng</span>
+        <strong>{{ fallbackRecommendation.email }}</strong>
+        <span>{{ fallbackRecommendation.quota_remaining }}</span>
+      </div>
+      <div class="account-queue-summary">
+        <span>Reset gần nhất: {{ nextReset }}</span>
+        <span>
+          Hết quota: {{ session.state?.usage_statistics.exhausted_accounts ?? 0 }}
+        </span>
+      </div>
+    </section>
     <div class="account-toolbar">
       <AccountOverview />
       <GlassSelectPopover

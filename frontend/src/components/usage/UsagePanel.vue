@@ -129,6 +129,7 @@ const accountRows = computed<AccountTableRow[]>(() => usage.accountOptions.map(
     ) ?? null,
   }),
 ));
+const bankedResetRows = computed(() => session.state?.accounts ?? []);
 const selectedFreshness = computed(() => {
   if (usage.selectedTokenAccount) return usage.selectedTokenAccount.status;
   if (usage.selectedBuckets === null) return "unavailable";
@@ -176,6 +177,23 @@ function formatPercent(value: number | null | undefined): string {
   return value === null || value === undefined
     ? "—"
     : `${value.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
+}
+
+function formatBankedResetCount(value: number | null): string {
+  if (value === null) return "Chưa có dữ liệu";
+  return `${value.toLocaleString("vi-VN")} lượt`;
+}
+
+function bankedResetExpirationNote(
+  count: number | null,
+  expirations: ReadonlyArray<string> | null,
+): string {
+  if (count === null) return "Chưa có dữ liệu";
+  if (count === 0) return "Không có lượt khả dụng";
+  if (expirations === null) return "OpenAI chưa trả chi tiết";
+  if (expirations.length === 0) return "Chưa có chi tiết hạn dùng";
+  const missing = Math.max(0, count - expirations.length);
+  return missing > 0 ? `Còn ${missing} lượt chưa có chi tiết` : "";
 }
 
 function formatDuration(value: number | null | undefined): string {
@@ -487,6 +505,83 @@ onMounted(() => {
         <div><dt>Reset</dt><dd>{{ usage.selectedQuotaAccount?.quota_reset_at ?? "—" }}</dd></div>
         <div><dt>Trạng thái</dt><dd>{{ quotaCategoryLabel(usage.selectedQuotaAccount) }}</dd></div>
       </dl>
+    </section>
+
+    <section
+      class="banked-reset-section"
+      aria-labelledby="banked-reset-heading"
+    >
+      <div class="usage-heading banked-reset-heading">
+        <div>
+          <p class="data-label">Reset đã lưu</p>
+          <h3 id="banked-reset-heading">Banked reset theo tài khoản</h3>
+        </div>
+        <p>Số lượt còn dùng được và hạn sử dụng OpenAI trả về.</p>
+      </div>
+      <div
+        class="usage-table-wrap banked-reset-table-wrap solid-content-table standard-surface"
+        data-material="standard"
+        data-content-role="banked-reset-table"
+      >
+        <table class="usage-table banked-reset-table">
+          <caption class="sr-only">
+            Số lượt banked reset và hạn sử dụng theo từng tài khoản
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Tài khoản</th>
+              <th scope="col">Gói</th>
+              <th scope="col">Lượt banked reset</th>
+              <th scope="col">Hạn sử dụng</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="account in bankedResetRows" :key="account.id">
+              <td data-label="Tài khoản" class="usage-account-email">
+                {{ account.email }}
+              </td>
+              <td data-label="Gói">{{ account.plan_type }}</td>
+              <td data-label="Lượt banked reset">
+                <span
+                  class="status-badge"
+                  :class="account.banked_reset_count === null
+                    ? 'is-unavailable'
+                    : account.banked_reset_count > 0
+                      ? 'is-usable'
+                      : ''"
+                >
+                  {{ formatBankedResetCount(account.banked_reset_count) }}
+                </span>
+              </td>
+              <td data-label="Hạn sử dụng" class="banked-reset-expiration-cell">
+                <ul v-if="account.banked_reset_expires_at?.length" class="banked-reset-expirations">
+                  <li
+                    v-for="(expiration, index) in account.banked_reset_expires_at"
+                    :key="`${expiration}-${index}`"
+                  >
+                    Lượt {{ index + 1 }}: <strong>{{ expiration }}</strong>
+                  </li>
+                </ul>
+                <span
+                  v-if="bankedResetExpirationNote(
+                    account.banked_reset_count,
+                    account.banked_reset_expires_at,
+                  )"
+                  class="banked-reset-note"
+                >
+                  {{ bankedResetExpirationNote(
+                    account.banked_reset_count,
+                    account.banked_reset_expires_at,
+                  ) }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="bankedResetRows.length === 0" class="empty-usage">
+          Chưa có tài khoản.
+        </p>
+      </div>
     </section>
 
     <section

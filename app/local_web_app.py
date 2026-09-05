@@ -55,6 +55,8 @@ class AccountState(BaseModel):
     quota_cycle: str
     quota_reset_at: str
     quota_windows: list[QuotaWindowState] = Field(default_factory=list)
+    banked_reset_count: int | None = Field(default=None, ge=0)
+    banked_reset_expires_at: list[str] | None = None
     plan_type: str
     account_state: str
     sync_status: str

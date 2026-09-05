@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Protocol
 
 
-API_SCHEMA_VERSION = 11
+API_SCHEMA_VERSION = 12
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { ref } from "vue";
 
 import { userFacingError } from "@/api/client.ts";
 import GlassButton from "@/components/glass/GlassButton.vue";
@@ -23,16 +23,6 @@ const passwordAccount = ref<AccountState | null>(null);
 const updatedPassword = ref("");
 const passwordSaving = ref(false);
 const importMorphId = "import-account-dialog";
-const recommendationQueue = computed(() => (
-  session.state?.recommendation_queue ?? []
-));
-const recommendation = computed(() => recommendationQueue.value[0] ?? null);
-const fallbackRecommendation = computed(() => (
-  recommendationQueue.value[1] ?? null
-));
-const nextReset = computed(() => (
-  session.state?.usage_statistics.next_reset_at ?? "Chưa rõ"
-));
 const actionTypes: AccountAction[] = [
   "refresh",
   "login",
@@ -165,16 +155,6 @@ async function savePassword(): Promise<void> {
   }
 }
 
-async function focusRecommendation(): Promise<void> {
-  const accountId = recommendation.value?.account_id;
-  if (!accountId) return;
-  accounts.filter = "all";
-  await nextTick();
-  const card = document.getElementById(`account-${accountId}`);
-  card?.scrollIntoView({ behavior: "smooth", block: "center" });
-  card?.focus({ preventScroll: true });
-}
-
 </script>
 
 <template>
@@ -210,62 +190,6 @@ async function focusRecommendation(): Promise<void> {
         </ImportDialog>
       </div>
     </div>
-    <section
-      class="account-smart-queue standard-surface"
-      data-material="standard"
-      aria-label="Hàng đợi tài khoản thông minh"
-    >
-      <div class="account-smart-queue-heading">
-        <div>
-          <p class="data-label">Hàng đợi tài khoản thông minh</p>
-          <h3 v-if="recommendation">Nên dùng lúc này</h3>
-          <h3 v-else>Chưa có đề xuất</h3>
-        </div>
-        <GlassButton
-          variant="quiet"
-          data-action="refresh-recommendation"
-          :busy="accounts.isBusy('all-accounts', 'refresh')"
-          @click="refresh(null)"
-        >
-          Đánh giá lại
-        </GlassButton>
-      </div>
-      <div
-        v-if="recommendation"
-        class="account-queue-item is-recommended"
-        data-queue-role="recommended"
-      >
-        <div>
-          <strong>{{ recommendation.email }}</strong>
-          <p>{{ recommendation.reason }}</p>
-        </div>
-        <GlassButton
-          variant="lite"
-          data-action="focus-recommendation"
-          @click="focusRecommendation"
-        >
-          Xem tài khoản
-        </GlassButton>
-      </div>
-      <p v-else class="account-queue-empty">
-        Chưa có tài khoản đủ dữ liệu để đề xuất. Hãy đồng bộ lại trạng thái.
-      </p>
-      <div
-        v-if="fallbackRecommendation"
-        class="account-queue-item"
-        data-queue-role="fallback"
-      >
-        <span>Dự phòng</span>
-        <strong>{{ fallbackRecommendation.email }}</strong>
-        <span>{{ fallbackRecommendation.quota_remaining }}</span>
-      </div>
-      <div class="account-queue-summary">
-        <span>Reset gần nhất: {{ nextReset }}</span>
-        <span>
-          Hết quota: {{ session.state?.usage_statistics.exhausted_accounts ?? 0 }}
-        </span>
-      </div>
-    </section>
     <div class="account-toolbar">
       <AccountOverview />
       <GlassSelectPopover

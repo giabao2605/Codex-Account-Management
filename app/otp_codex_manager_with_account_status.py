@@ -137,6 +137,8 @@ class CodexInfo:
     cycle: str = "—"
     reset_at: str = "—"
     quota_windows: tuple[dict[str, str], ...] = ()
+    banked_reset_count: int | None = None
+    banked_reset_expires_at: tuple[str, ...] | None = None
     plan_type: str = "—"
     account_state: str = "Chưa xác định"
     status: str = "Chưa liên kết"

@@ -180,6 +180,38 @@ def _format_quota_windows(result: dict) -> tuple[dict[str, str], ...]:
     )
 
 
+def _format_banked_reset_state(
+    result: dict,
+) -> tuple[int | None, tuple[str, ...] | None]:
+    limits = result.get("limits")
+    quota = result.get("quota")
+    if not isinstance(quota, dict) and isinstance(limits, dict):
+        quota = normalize_quota_snapshot(limits).to_dict()
+    if not isinstance(quota, dict):
+        return None, None
+
+    count = quota.get("banked_reset_count")
+    normalized_count = (
+        max(0, int(count))
+        if isinstance(count, (int, float)) and not isinstance(count, bool)
+        else None
+    )
+    expirations = quota.get("banked_reset_expires_at")
+    if not isinstance(expirations, list):
+        return normalized_count, None
+
+    formatted = tuple(
+        "Không hết hạn" if expires_at is None else format_reset_time(expires_at)
+        for expires_at in expirations
+        if expires_at is None
+        or (
+            isinstance(expires_at, (int, float))
+            and not isinstance(expires_at, bool)
+        )
+    )
+    return normalized_count, formatted
+
+
 class LocalWebService:
     def __init__(
         self,
@@ -304,6 +336,12 @@ class LocalWebService:
                     "quota_windows": [
                         dict(window) for window in info.quota_windows
                     ],
+                    "banked_reset_count": info.banked_reset_count,
+                    "banked_reset_expires_at": (
+                        list(info.banked_reset_expires_at)
+                        if info.banked_reset_expires_at is not None
+                        else None
+                    ),
                     "plan_type": info.plan_type,
                     "account_state": info.account_state,
                     "sync_status": info.status,
@@ -501,6 +539,8 @@ class LocalWebService:
                             cycle="—",
                             reset_at="—",
                             quota_windows=(),
+                            banked_reset_count=None,
+                            banked_reset_expires_at=None,
                             plan_type="—",
                             account_state="Chưa xác định",
                             status="Chưa liên kết",
@@ -1192,6 +1232,8 @@ class LocalWebService:
                     status="Chưa liên kết",
                     account_state="Chưa xác định",
                     last_sync="—",
+                    banked_reset_count=None,
+                    banked_reset_expires_at=None,
                 )
             return "unlinked"
 
@@ -1409,6 +1451,8 @@ class LocalWebService:
                 current,
                 status="Đã đăng xuất – bấm Liên kết Codex",
                 last_sync=datetime.now().strftime("%H:%M:%S"),
+                banked_reset_count=None,
+                banked_reset_expires_at=None,
             )
 
     def _apply_codex_result(
@@ -1446,6 +1490,8 @@ class LocalWebService:
                     cycle="—",
                     reset_at="—",
                     quota_windows=(),
+                    banked_reset_count=None,
+                    banked_reset_expires_at=None,
                     plan_type="—",
                     account_state="Sai tài khoản Codex",
                     status=(
@@ -1466,6 +1512,9 @@ class LocalWebService:
         cycle = "—"
         reset_at = "—"
         quota_windows = _format_quota_windows(result)
+        banked_reset_count, banked_reset_expires_at = (
+            _format_banked_reset_state(result)
+        )
         status = "Không có dữ liệu quota"
 
         if window is not None:
@@ -1495,6 +1544,8 @@ class LocalWebService:
                 cycle=cycle,
                 reset_at=reset_at,
                 quota_windows=quota_windows,
+                banked_reset_count=banked_reset_count,
+                banked_reset_expires_at=banked_reset_expires_at,
                 plan_type=(
                     plan_type.capitalize()
                     if plan_type != "—"

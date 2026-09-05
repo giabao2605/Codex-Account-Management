@@ -432,6 +432,13 @@ class SparseMergeTests(unittest.TestCase):
     def test_normalizes_structured_quota_and_reached_type(self) -> None:
         snapshot = normalize_quota_snapshot(
             {
+                "rateLimitResetCredits": {
+                    "availableCount": 2,
+                    "credits": [
+                        {"expiresAt": 1_893_456_000},
+                        {"expiresAt": None},
+                    ],
+                },
                 "rateLimitsByLimitId": {
                     "codex": {
                         "limitId": "codex",
@@ -454,6 +461,27 @@ class SparseMergeTests(unittest.TestCase):
         self.assertEqual(snapshot.windows[0].limit_id, "codex")
         self.assertEqual(snapshot.windows[0].kind, "primary")
         self.assertEqual(snapshot.windows[0].used_percent, 87.0)
+        self.assertEqual(snapshot.banked_reset_count, 2)
+        self.assertEqual(
+            snapshot.banked_reset_expires_at,
+            (1_893_456_000, None),
+        )
+
+    def test_banked_reset_count_remains_known_without_credit_details(
+        self,
+    ) -> None:
+        snapshot = normalize_quota_snapshot(
+            {
+                "rateLimitResetCredits": {
+                    "availableCount": 3,
+                    "credits": None,
+                },
+                "rateLimits": {},
+            }
+        )
+
+        self.assertEqual(snapshot.banked_reset_count, 3)
+        self.assertIsNone(snapshot.banked_reset_expires_at)
 
     def test_quota_is_not_exhausted_when_any_window_remains(self) -> None:
         snapshot = normalize_quota_snapshot(
@@ -536,6 +564,8 @@ class PersistentSessionTests(unittest.TestCase):
             quota_payloads[0],
             {
                 "quota": {
+                    "banked_reset_count": None,
+                    "banked_reset_expires_at": None,
                     "exhausted": True,
                     "rate_limit_reached_type": "weekly",
                     "windows": [
@@ -563,6 +593,10 @@ class PersistentSessionTests(unittest.TestCase):
             ),
         )
         session._cached_limits = {
+            "rateLimitResetCredits": {
+                "availableCount": 1,
+                "credits": [{"expiresAt": 1_800_000_000}],
+            },
             "rateLimitsByLimitId": {
                 "codex": {
                     "rateLimitReachedType": "weekly",
@@ -592,6 +626,45 @@ class PersistentSessionTests(unittest.TestCase):
         ][-1]
         self.assertIsNone(quota["rate_limit_reached_type"])
         self.assertFalse(quota["exhausted"])
+        self.assertEqual(quota["banked_reset_count"], 1)
+        self.assertEqual(quota["banked_reset_expires_at"], [1_800_000_000])
+
+    def test_explicit_null_clears_stale_banked_reset_details(self) -> None:
+        notifications: list[tuple[str, dict]] = []
+        session = CodexProfileSession(
+            profile_dir=Path.cwd(),
+            command=[sys.executable, "-c", "pass"],
+            environment=os.environ.copy(),
+            notification_handler=lambda event, payload: notifications.append(
+                (event, payload)
+            ),
+        )
+        session._cached_limits = {
+            "rateLimitResetCredits": {
+                "availableCount": 1,
+                "credits": [{"expiresAt": 1_800_000_000}],
+            }
+        }
+
+        session._handle_message(
+            {
+                "method": "account/rateLimits/updated",
+                "params": {
+                    "rateLimitResetCredits": {
+                        "availableCount": 0,
+                        "credits": None,
+                    }
+                },
+            }
+        )
+
+        quota = [
+            payload["quota"]
+            for event, payload in notifications
+            if event == "quota_updated"
+        ][-1]
+        self.assertEqual(quota["banked_reset_count"], 0)
+        self.assertIsNone(quota["banked_reset_expires_at"])
 
     def test_emits_sanitized_usage_limit_event(self) -> None:
         notifications: list[tuple[str, dict]] = []

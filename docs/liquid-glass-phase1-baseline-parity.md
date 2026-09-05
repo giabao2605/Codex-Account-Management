@@ -7,7 +7,7 @@ Phase 1 khóa trạng thái frontend/backend hiện tại trước khi scaffold 
 ## Baseline kỹ thuật
 
 - Branch hiện tại: `main`, commit gốc đang checkout: `b8d87ff`, working tree có thay đổi chưa commit.
-- Backend contract hiện tại: `API_SCHEMA_VERSION = 11`.
+- Backend contract hiện tại: `API_SCHEMA_VERSION = 12`.
 - Token usage contract hiện tại: `TokenUsageResponse.schema_version = 2`, `source = "codex_account_usage"`.
 - Frontend hiện tại vẫn là vanilla HTML/CSS/JS trong `web/`; chưa có `frontend/`, Vite, Vue, Pinia, hoặc Playwright trong baseline.
 - Build fingerprint hiện tính từ runtime Python, local web service, token usage module, và các asset `web/`.

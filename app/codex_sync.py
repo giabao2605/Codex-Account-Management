@@ -55,9 +55,17 @@ class CodexQuotaSnapshot:
     reached_type: str | None
     exhausted: bool
     windows: tuple[CodexQuotaWindow, ...]
+    banked_reset_count: int | None = None
+    banked_reset_expires_at: tuple[int | None, ...] | None = None
 
     def to_dict(self) -> dict:
         return {
+            "banked_reset_count": self.banked_reset_count,
+            "banked_reset_expires_at": (
+                list(self.banked_reset_expires_at)
+                if self.banked_reset_expires_at is not None
+                else None
+            ),
             "exhausted": self.exhausted,
             "rate_limit_reached_type": self.reached_type,
             "windows": [window.to_dict() for window in self.windows],
@@ -86,8 +94,30 @@ def _optional_int(value: object) -> int | None:
 def normalize_quota_snapshot(payload: object) -> CodexQuotaSnapshot:
     source = payload if isinstance(payload, dict) else {}
     windows: list[CodexQuotaWindow] = []
+    banked_reset_count: int | None = None
+    banked_reset_expires_at: tuple[int | None, ...] | None = None
     reached_type = _optional_text(source.get("rateLimitReachedType"))
     buckets = source.get("rateLimitsByLimitId")
+
+    reset_credits = source.get("rateLimitResetCredits")
+    if isinstance(reset_credits, dict):
+        available_count = _optional_int(reset_credits.get("availableCount"))
+        if available_count is not None:
+            banked_reset_count = max(0, available_count)
+        credit_rows = reset_credits.get("credits")
+        if isinstance(credit_rows, list):
+            expirations: list[int | None] = []
+            for credit in credit_rows:
+                if not isinstance(credit, dict) or "expiresAt" not in credit:
+                    continue
+                expires_at = credit["expiresAt"]
+                if expires_at is None:
+                    expirations.append(None)
+                    continue
+                normalized_expiration = _optional_int(expires_at)
+                if normalized_expiration is not None:
+                    expirations.append(normalized_expiration)
+            banked_reset_expires_at = tuple(expirations)
 
     if isinstance(buckets, dict):
         for bucket_key, bucket in sorted(
@@ -161,6 +191,8 @@ def normalize_quota_snapshot(payload: object) -> CodexQuotaSnapshot:
         reached_type=reached_type,
         exhausted=exhausted,
         windows=tuple(windows),
+        banked_reset_count=banked_reset_count,
+        banked_reset_expires_at=banked_reset_expires_at,
     )
 
 
@@ -226,6 +258,17 @@ def _merge_rate_limit_update(current: dict, update: dict) -> dict:
                 apply_authoritative_nulls(nested, value)
 
     apply_authoritative_nulls(merged, update)
+
+    reset_credit_update = update.get("rateLimitResetCredits")
+    reset_credit_destination = merged.get("rateLimitResetCredits")
+    if (
+        isinstance(reset_credit_update, dict)
+        and isinstance(reset_credit_destination, dict)
+        and "credits" in reset_credit_update
+    ):
+        reset_credit_destination["credits"] = copy.deepcopy(
+            reset_credit_update["credits"]
+        )
     return merged
 
 

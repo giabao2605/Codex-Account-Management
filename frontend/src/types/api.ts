@@ -15,6 +15,8 @@ export interface AccountState {
   quota_cycle: string;
   quota_reset_at: string;
   quota_windows: ReadonlyArray<QuotaWindowState>;
+  banked_reset_count: number | null;
+  banked_reset_expires_at: ReadonlyArray<string> | null;
   plan_type: string;
   account_state: string;
   sync_status: string;

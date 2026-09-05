@@ -152,6 +152,13 @@ class LocalWebApiTests(unittest.TestCase):
                     }
                 },
                 "limits": {
+                    "rateLimitResetCredits": {
+                        "availableCount": 2,
+                        "credits": [
+                            {"expiresAt": 1_893_456_000},
+                            {"expiresAt": None},
+                        ],
+                    },
                     "rateLimits": {
                         "primary": {
                             "usedPercent": 99,
@@ -201,6 +208,40 @@ class LocalWebApiTests(unittest.TestCase):
             ],
         )
         self.assertEqual(account["quota_cycle"], "Weekly")
+        self.assertEqual(account["banked_reset_count"], 2)
+        self.assertEqual(
+            account["banked_reset_expires_at"],
+            [format_reset_time(1_893_456_000), "Không hết hạn"],
+        )
+
+    def test_state_keeps_banked_reset_count_when_details_are_unavailable(
+        self,
+    ) -> None:
+        self.add_service_accounts(
+            "user@example.com|password|JBSWY3DPEHPK3PXP"
+        )
+        self.service._apply_codex_result(
+            "user@example.com",
+            {
+                "account": {
+                    "account": {
+                        "email": "user@example.com",
+                        "planType": "plus",
+                    }
+                },
+                "limits": {
+                    "rateLimitResetCredits": {
+                        "availableCount": 3,
+                        "credits": None,
+                    },
+                    "rateLimits": {},
+                },
+            },
+        )
+
+        account = self.client.get("/api/state").json()["accounts"][0]
+        self.assertEqual(account["banked_reset_count"], 3)
+        self.assertIsNone(account["banked_reset_expires_at"])
 
     def test_liquid_glass_phase1_parity_document_covers_baseline(
         self,
@@ -214,7 +255,7 @@ class LocalWebApiTests(unittest.TestCase):
         content = baseline_path.read_text(encoding="utf-8")
 
         for expected in (
-            "API_SCHEMA_VERSION = 11",
+            "API_SCHEMA_VERSION = 12",
             "TokenUsageResponse.schema_version = 2",
             "/api/usage/tokens",
             "Authorization: Bearer <session token>",

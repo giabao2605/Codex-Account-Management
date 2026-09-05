@@ -70,6 +70,8 @@ describe("ImportDialog", () => {
     expect(wrapper.get(".account-check-status").text()).toBe("");
     expect(wrapper.find("textarea").exists()).toBe(false);
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Quét QR từ ảnh");
     expect(wrapper.text()).not.toContain("Xem trước");
     expect(button(wrapper, "Thêm").attributes()).toHaveProperty(
       "disabled",

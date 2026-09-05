@@ -36,8 +36,12 @@ class VisualBaselineFixtureTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertEqual(payload["api_schema_version"], 11)
+        self.assertEqual(payload["api_schema_version"], 12)
         self.assertEqual(len(payload["state"]["accounts"]), 3)
+        self.assertEqual(
+            payload["state"]["accounts"][0]["banked_reset_count"],
+            2,
+        )
         self.assertTrue(
             all(
                 account["email"].endswith(".test")

@@ -14,6 +14,8 @@ export function applicationState(): ApplicationState {
         quota_remaining: "82%",
         quota_cycle: "5 giờ",
         quota_reset_at: "23/07 14:00",
+        banked_reset_count: 2,
+        banked_reset_expires_at: ["30/07 09:00", "Không hết hạn"],
         quota_windows: [
           {
             quota_remaining: "82%",
@@ -39,6 +41,8 @@ export function applicationState(): ApplicationState {
         quota_remaining: "Chưa rõ",
         quota_cycle: "Chưa rõ",
         quota_reset_at: "Chưa rõ",
+        banked_reset_count: null,
+        banked_reset_expires_at: null,
         quota_windows: [],
         plan_type: "Chưa rõ",
         account_state: "Chưa xác định",

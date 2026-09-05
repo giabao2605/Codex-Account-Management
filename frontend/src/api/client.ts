@@ -11,7 +11,7 @@ import type {
   TokenUsageResponse,
 } from "@/types/api.ts";
 
-export const EXPECTED_API_SCHEMA_VERSION = 11;
+export const EXPECTED_API_SCHEMA_VERSION = 12;
 const GENERIC_API_ERROR = "Không thể kết nối ứng dụng local.";
 const MAX_ERROR_DETAIL_LENGTH = 200;
 

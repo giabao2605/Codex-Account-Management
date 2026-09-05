@@ -40,7 +40,8 @@ describe("UsagePanel", () => {
       .toBe(false);
     expect(wrapper.text()).toContain("1 mới");
     expect(wrapper.text()).toContain("1 chưa có");
-    expect(wrapper.findAll("thead th").map((cell) => cell.text())).toEqual([
+    expect(wrapper.get('[data-content-role="account-table"]')
+      .findAll("thead th").map((cell) => cell.text())).toEqual([
       "Tài khoản",
       "Gói",
       "Lifetime",
@@ -57,6 +58,40 @@ describe("UsagePanel", () => {
     expect(wrapper.get(".all-token-total span").text())
       .toBe("Hôm qua · 22/07/2026");
     expect(wrapper.find(".quota-summary").exists()).toBe(true);
+    const resetTable = wrapper.get('[data-content-role="banked-reset-table"]');
+    expect(resetTable.findAll("thead th").map((cell) => cell.text())).toEqual([
+      "Tài khoản",
+      "Gói",
+      "Lượt banked reset",
+      "Hạn sử dụng",
+    ]);
+    expect(resetTable.text()).toContain("alpha@example.test");
+    expect(resetTable.text()).toContain("2 lượt");
+    expect(resetTable.text()).toContain("30/07 09:00");
+    expect(resetTable.text()).toContain("Không hết hạn");
+    expect(resetTable.text()).toContain("Chưa có dữ liệu");
+  });
+
+  it("explains when OpenAI returns only the banked reset count", async () => {
+    const { wrapper } = mountPanel();
+    await flushPromises();
+    const session = useSessionStore();
+    if (!session.state) throw new Error("Expected application state");
+    session.state = {
+      ...session.state,
+      accounts: session.state.accounts.map((account, index) => index === 0
+        ? {
+            ...account,
+            banked_reset_count: 3,
+            banked_reset_expires_at: null,
+          }
+        : account),
+    };
+    await wrapper.vm.$nextTick();
+
+    const resetTable = wrapper.get('[data-content-role="banked-reset-table"]');
+    expect(resetTable.text()).toContain("3 lượt");
+    expect(resetTable.text()).toContain("OpenAI chưa trả chi tiết");
   });
 
   it("separates standard usage content from the liquid control layer", async () => {

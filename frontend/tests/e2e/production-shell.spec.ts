@@ -115,7 +115,7 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
     return lens
       ? lens.getBoundingClientRect().width / element.getBoundingClientRect().width
       : 0;
-  })).toBeCloseTo(1 / 3, 1);
+  })).toBeCloseTo(1 / 2, 1);
 
   await page.getByRole("button", { name: /Lọc tài khoản/ }).click();
   await page.getByRole("dialog", { name: "Lọc tài khoản" })
@@ -139,6 +139,21 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
   await usageTab.click();
   await expect(page.locator("section[aria-label='Sử dụng token']")).toBeVisible();
   await expect(page.locator("#usage-panel")).toHaveCSS("opacity", "1");
+  const bankedResetTable = page.locator(
+    '[data-content-role="banked-reset-table"]',
+  );
+  await expect(bankedResetTable).toBeVisible();
+  await expect(bankedResetTable.getByRole("columnheader"))
+    .toHaveText([
+      "Tài khoản",
+      "Gói",
+      "Lượt banked reset",
+      "Hạn sử dụng",
+    ]);
+  await expect(bankedResetTable).toContainText("alpha@example.test");
+  await expect(bankedResetTable).toContainText("2 lượt");
+  await expect(bankedResetTable).toContainText("30/07 09:00");
+  await expect(bankedResetTable).toContainText("OpenAI chưa trả chi tiết");
   await expect.poll(() => page.locator(".heat-cell").count())
     .toBeGreaterThanOrEqual(365);
   await page.getByRole("button", { name: "Tuần" }).click();
@@ -147,10 +162,9 @@ test("production app preserves parity, accessibility, and glass fallbacks", asyn
   const accountsTab = page.getByRole("tab", { name: "Tài khoản" });
   await expect(accountsTab).toBeFocused();
   await accountsTab.press("End");
-  const failoverTab = page.getByRole("tab", { name: "Failover" });
-  await expect(failoverTab).toBeFocused();
-  await expect(page.locator("#failover-panel")).toHaveCSS("opacity", "1");
-  await expect(page.getByText("Trạng thái failover", { exact: true })).toBeVisible();
+  await expect(usageTab).toBeFocused();
+  await expect(page.getByRole("tab", { name: "Failover" })).toHaveCount(0);
+  await expect(page.locator("#failover-panel")).toHaveCount(0);
   expect(await seriousAxeViolations(page)).toEqual([]);
 
   await page.getByRole("button", { name: "Giao diện" }).click();

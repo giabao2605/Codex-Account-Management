@@ -24,9 +24,6 @@ const AccountsPanel = defineAsyncComponent(
 const UsagePanel = defineAsyncComponent(
   () => import("@/components/usage/UsagePanel.vue"),
 );
-const FailoverPanel = defineAsyncComponent(
-  () => import("@/components/failover/FailoverPanel.vue"),
-);
 const GlassLab = defineAsyncComponent(
   () => import("@/components/glass/GlassLab.vue"),
 );
@@ -34,15 +31,13 @@ const props = defineProps<{ accessToken: string }>();
 const isGlassLab = new URL(window.location.href).searchParams.get(
   "glass-lab",
 ) === "1";
-type WorkspaceTab = "accounts" | "usage" | "failover";
+type WorkspaceTab = "accounts" | "usage";
 const tabs = [
   { value: "accounts", label: "Tài khoản", id: "accounts-tab", controls: "accounts-panel" },
   { value: "usage", label: "Sử dụng", id: "usage-tab", controls: "usage-panel" },
-  { value: "failover", label: "Failover", id: "failover-tab", controls: "failover-panel" },
 ];
 const activeTab = ref<WorkspaceTab>("accounts");
 const usagePanelMounted = ref(false);
-const failoverPanelMounted = ref(false);
 const feedback = useFeedbackStore();
 const session = useSessionStore();
 const shutdownBusy = ref(false);
@@ -62,7 +57,6 @@ const connectionLabel = computed(() => ({
 
 function selectTab(tab: WorkspaceTab): void {
   if (tab === "usage") usagePanelMounted.value = true;
-  if (tab === "failover") failoverPanelMounted.value = true;
   activeTab.value = tab;
   window.dispatchEvent(new window.Event("glass-context-refresh"));
 }
@@ -190,17 +184,6 @@ onBeforeUnmount(() => {
           :inert="activeTab !== 'usage'"
         >
           <UsagePanel v-if="usagePanelMounted" />
-        </section>
-        <section
-          id="failover-panel"
-          class="workspace-panel"
-          role="tabpanel"
-          aria-labelledby="failover-tab"
-          :aria-hidden="activeTab !== 'failover'"
-          :data-active="activeTab === 'failover'"
-          :inert="activeTab !== 'failover'"
-        >
-          <FailoverPanel v-if="failoverPanelMounted" />
         </section>
       </div>
     </main>

@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 from .build_info import (
@@ -57,6 +58,7 @@ class AccountState(BaseModel):
     quota_windows: list[QuotaWindowState] = Field(default_factory=list)
     banked_reset_count: int | None = Field(default=None, ge=0)
     banked_reset_expires_at: list[str] | None = None
+    plus_expires_at: str | None = None
     plan_type: str
     account_state: str
     sync_status: str
@@ -298,6 +300,22 @@ class PasswordUpdateRequest(BaseModel):
 
 
 class PasswordUpdateResponse(BaseModel):
+    updated: bool
+
+
+class SecretUpdateRequest(BaseModel):
+    secret: str
+
+
+class SecretUpdateResponse(BaseModel):
+    updated: bool
+
+
+class PlusExpirationUpdateRequest(BaseModel):
+    plus_expires_at: str | None = Field(...)
+
+
+class PlusExpirationUpdateResponse(BaseModel):
     updated: bool
 
 
@@ -722,6 +740,63 @@ def create_app(
 
         return PasswordUpdateResponse(updated=True)
 
+    @app.patch(
+        "/api/accounts/{account_id}/secret",
+        response_model=SecretUpdateResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def update_secret(
+        account_id: str,
+        request: SecretUpdateRequest,
+    ) -> SecretUpdateResponse:
+        try:
+            active_service.update_secret(account_id, request.secret)
+        except AccountNotFoundError as error:
+            raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.") from error
+        except AccountConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except OSError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể cập nhật secret an toàn.",
+            ) from error
+
+        return SecretUpdateResponse(updated=True)
+
+    @app.patch(
+        "/api/accounts/{account_id}/plus-expiration",
+        response_model=PlusExpirationUpdateResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def update_plus_expiration(
+        account_id: str,
+        request: PlusExpirationUpdateRequest,
+    ) -> PlusExpirationUpdateResponse:
+        try:
+            active_service.update_plus_expiration(
+                account_id,
+                request.plus_expires_at,
+            )
+        except AccountNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Không tìm thấy tài khoản.",
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
+        except OSError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể cập nhật ngày hết hạn Plus an toàn.",
+            ) from error
+
+        return PlusExpirationUpdateResponse(updated=True)
+
     @app.post(
         "/api/codex/refresh",
         response_model=ActionResponse,
@@ -810,9 +885,12 @@ def create_app(
 
     app.mount(
         "/assets",
-        StaticFiles(
-            directory=active_static_assets_dir,
-            check_dir=False,
+        GZipMiddleware(
+            StaticFiles(
+                directory=active_static_assets_dir,
+                check_dir=False,
+            ),
+            minimum_size=1000,
         ),
         name="assets",
     )

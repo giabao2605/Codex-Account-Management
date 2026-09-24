@@ -158,4 +158,86 @@ describe("AccountsPanel", () => {
     expect(wrapper.text()).not.toContain("new-password");
     expect(JSON.stringify(accounts.$state)).not.toContain("new-password");
   });
+
+  it("opens a secret form, copies the saved secret, and saves a replacement", async () => {
+    const accounts = useAccountsStore();
+    const sensitiveValue = vi.spyOn(accounts, "sensitiveValue")
+      .mockResolvedValue("saved-secret");
+    const updateSecret = vi.spyOn(accounts, "updateSecret").mockResolvedValue();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const wrapper = mount(AccountsPanel, {
+      global: { stubs: { Teleport: true } },
+    });
+
+    await wrapper.findAll('[data-action="options"]')[0]!.trigger("click");
+    await vi.dynamicImportSettled();
+    await wrapper.get('[data-action="secret"]').trigger("click");
+    expect(wrapper.get('[role="dialog"]').text()).toContain("Secret hiện tại");
+    expect(sensitiveValue).not.toHaveBeenCalled();
+    expect(wrapper.text()).not.toContain("saved-secret");
+
+    await wrapper.get('[data-action="copy-secret"]').trigger("click");
+    await flushPromises();
+    expect(sensitiveValue).toHaveBeenCalledWith(
+      applicationState().accounts[0]!.id, "secret",
+    );
+    expect(writeText).toHaveBeenCalledWith("saved-secret");
+
+    const input = wrapper.get<HTMLInputElement>('input[name="updated-secret"]');
+    expect(input.attributes("type")).toBe("password");
+    await input.setValue("KRUGS4ZANFZSAYJA");
+    await wrapper.get('[data-action="save-secret"]').trigger("click");
+    await flushPromises();
+    expect(updateSecret).toHaveBeenCalledWith(
+      applicationState().accounts[0]!.id, "KRUGS4ZANFZSAYJA",
+    );
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("KRUGS4ZANFZSAYJA");
+    expect(JSON.stringify(accounts.$state)).not.toContain("KRUGS4ZANFZSAYJA");
+  });
+
+  it("edits and clears a locally stored Plus expiration with a native date input", async () => {
+    const accounts = useAccountsStore();
+    const updatePlusExpiration = vi.spyOn(accounts, "updatePlusExpiration")
+      .mockResolvedValue();
+    const wrapper = mount(AccountsPanel, {
+      global: { stubs: { Teleport: true } },
+    });
+
+    await wrapper.findAll('[data-action="options"]')[0]!.trigger("click");
+    await vi.dynamicImportSettled();
+    await wrapper.get('[data-action="edit-plus-expiration"]').trigger("click");
+    const input = wrapper.get<HTMLInputElement>(
+      'input[name="updated-plus-expiration"]',
+    );
+
+    expect(input.attributes("type")).toBe("date");
+    expect(input.element.value).toBe("2026-10-11");
+    expect(wrapper.get('[role="dialog"]').text()).toContain("tự nhập");
+    await input.setValue("2026-11-12");
+    await wrapper.get('[data-action="save-plus-expiration"]').trigger("click");
+    await flushPromises();
+
+    expect(updatePlusExpiration).toHaveBeenCalledWith(
+      applicationState().accounts[0]!.id,
+      "2026-11-12",
+    );
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+
+    await wrapper.findAll('[data-action="options"]')[0]!.trigger("click");
+    await vi.dynamicImportSettled();
+    await wrapper.get('[data-action="edit-plus-expiration"]').trigger("click");
+    const clearInput = wrapper.get<HTMLInputElement>(
+      'input[name="updated-plus-expiration"]',
+    );
+    await clearInput.setValue("");
+    await wrapper.get('[data-action="save-plus-expiration"]').trigger("click");
+    await flushPromises();
+
+    expect(updatePlusExpiration).toHaveBeenLastCalledWith(
+      applicationState().accounts[0]!.id,
+      null,
+    );
+  });
 });

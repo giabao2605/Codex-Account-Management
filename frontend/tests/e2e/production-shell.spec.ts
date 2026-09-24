@@ -195,7 +195,7 @@ test("uses reclaimed header space for account status details", async ({
     const details = element.querySelectorAll<HTMLElement>(
       ".account-sync-details > div",
     );
-    if (!header || !meters || details.length !== 3) return null;
+    if (!header || !meters || details.length !== 4) return null;
     const headerContentBottom = Math.max(
       ...[...header.children].map(
         (child) => child.getBoundingClientRect().bottom,

@@ -1,3 +1,4 @@
+import base64
 import os
 import json
 import re
@@ -213,6 +214,7 @@ class LocalWebApiTests(unittest.TestCase):
             account["banked_reset_expires_at"],
             [format_reset_time(1_893_456_000), "Không hết hạn"],
         )
+        self.assertIsNone(account["plus_expires_at"])
 
     def test_state_keeps_banked_reset_count_when_details_are_unavailable(
         self,
@@ -351,6 +353,25 @@ class LocalWebApiTests(unittest.TestCase):
             self.assertEqual(asset_response.status_code, 200, asset_path)
         script = self.production_asset_text(".js")
         self.assertIn("otp-codex-access-token", script)
+
+    def test_static_assets_are_compressed_without_compressing_api(self) -> None:
+        page = self.client.get("/").text
+        script_path = re.search(r'src="(/assets/index-[^"]+\.js)"', page)
+        self.assertIsNotNone(script_path)
+
+        asset = self.client.get(
+            script_path.group(1),
+            headers={"Accept-Encoding": "gzip"},
+        )
+        api = self.client.get(
+            "/api/state",
+            headers={"Accept-Encoding": "gzip"},
+        )
+
+        self.assertEqual(asset.status_code, 200)
+        self.assertEqual(asset.headers.get("content-encoding"), "gzip")
+        self.assertEqual(api.status_code, 200)
+        self.assertNotIn("content-encoding", api.headers)
 
     def test_frontend_supports_persistent_light_and_dark_themes(self) -> None:
         page = self.client.get("/").text
@@ -1614,6 +1635,203 @@ class LocalWebApiTests(unittest.TestCase):
         session.close.assert_not_called()
         with self.service._lock:
             self.assertIs(self.service._sessions["user@example.com"], session)
+
+    def test_update_secret_replaces_otp_and_persists(self) -> None:
+        self.add_account("user@example.com|password|JBSWY3DPEHPK3PXP")
+        account_id = self.client.get("/api/state").json()["accounts"][0]["id"]
+        new_secret = "KRUGS4ZANFZSAYJA"
+
+        response = self.client.patch(
+            f"/api/accounts/{account_id}/secret",
+            headers=self.headers,
+            json={"secret": "krug s4za nfzs ayja"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"updated": True})
+        self.assertNotIn(new_secret, response.text)
+        self.assertEqual(self.service.sensitive_value(account_id, "secret"), new_secret)
+        self.assertEqual(self.service._load_accounts()[0].secret, new_secret)
+        fixed_now = 1_700_000_000
+        clock_status = {
+            **self.service._trusted_clock.status(),
+            "last_synced_at": "2023-11-14T22:13:20+00:00",
+        }
+        with patch.object(self.service._trusted_clock, "status", return_value=clock_status), patch.object(
+            self.service._trusted_clock, "now", return_value=fixed_now
+        ):
+            state = self.client.get("/api/state").json()["accounts"][0]
+        self.assertNotIn(new_secret, str(state))
+        with self.service._lock:
+            account = self.service._find_account_locked(account_id)
+        self.assertEqual(state["otp"], account.totp.at(fixed_now))
+
+    def test_update_secret_rejects_invalid_duplicate_and_missing_csrf(self) -> None:
+        self.add_account("user@example.com|password|JBSWY3DPEHPK3PXP")
+        self.add_account("other@example.com|password|KRUGS4ZANFZSAYJA")
+        account_id = next(
+            account["id"]
+            for account in self.client.get("/api/state").json()["accounts"]
+            if account["email"] == "user@example.com"
+        )
+        path = f"/api/accounts/{account_id}/secret"
+
+        self.assertEqual(self.client.patch(path, json={"secret": "MFRGGZDF"}).status_code, 403)
+        for candidate, status in (("   ", 400), ("not-base32!", 400), ("KRUGS4ZANFZSAYJA", 409)):
+            response = self.client.patch(path, headers=self.headers, json={"secret": candidate})
+            self.assertEqual(response.status_code, status)
+            self.assertNotIn(candidate, response.text)
+        self.assertEqual(self.service.sensitive_value(account_id, "secret"), "JBSWY3DPEHPK3PXP")
+
+    def test_update_secret_keeps_old_otp_when_save_fails(self) -> None:
+        self.add_account("user@example.com|password|JBSWY3DPEHPK3PXP")
+        before = self.client.get("/api/state").json()["accounts"][0]
+        with patch.object(self.service, "_save_accounts", side_effect=OSError("disk full")):
+            response = self.client.patch(
+                f"/api/accounts/{before['id']}/secret",
+                headers=self.headers,
+                json={"secret": "KRUGS4ZANFZSAYJA"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.service.sensitive_value(before["id"], "secret"), "JBSWY3DPEHPK3PXP")
+        self.assertEqual(self.client.get("/api/state").json()["accounts"][0]["otp"], before["otp"])
+
+    def test_update_plus_expiration_persists_a_calendar_date_and_can_clear(
+        self,
+    ) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+
+        response = self.client.patch(
+            f"/api/accounts/{account_id}/plus-expiration",
+            headers=self.headers,
+            json={"plus_expires_at": "2026-10-11"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"updated": True})
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"][0][
+                "plus_expires_at"
+            ],
+            "2026-10-11",
+        )
+        self.assertEqual(
+            self.service._load_accounts()[0].plus_expires_at,
+            date(2026, 10, 11),
+        )
+        self.assertNotIn(
+            "2026-10-11",
+            self.service.data_file.read_text(encoding="utf-8"),
+        )
+
+        cleared = self.client.patch(
+            f"/api/accounts/{account_id}/plus-expiration",
+            headers=self.headers,
+            json={"plus_expires_at": None},
+        )
+
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertIsNone(
+            self.client.get("/api/state").json()["accounts"][0][
+                "plus_expires_at"
+            ]
+        )
+
+    def test_load_accounts_keeps_account_when_optional_expiration_cannot_decrypt(
+        self,
+    ) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        stored = json.loads(
+            self.service.data_file.read_text(encoding="utf-8")
+        )
+        stored["accounts"][0]["plus_expires_at"] = base64.b64encode(
+            b"not-a-dpapi-payload"
+        ).decode("ascii")
+        self.service.data_file.write_text(
+            json.dumps(stored),
+            encoding="utf-8",
+        )
+
+        loaded = self.service._load_accounts()
+
+        self.assertEqual([account.email for account in loaded], ["user@example.com"])
+        self.assertIsNone(loaded[0].plus_expires_at)
+
+    def test_update_plus_expiration_rejects_invalid_dates_and_requires_csrf(
+        self,
+    ) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+        invalid_value = "11/10/2026"
+        self.service.update_plus_expiration(account_id, "2026-10-11")
+
+        missing_csrf = self.client.patch(
+            f"/api/accounts/{account_id}/plus-expiration",
+            json={"plus_expires_at": "2026-10-11"},
+        )
+        missing_value = self.client.patch(
+            f"/api/accounts/{account_id}/plus-expiration",
+            headers=self.headers,
+            json={},
+        )
+        invalid = self.client.patch(
+            f"/api/accounts/{account_id}/plus-expiration",
+            headers=self.headers,
+            json={"plus_expires_at": invalid_value},
+        )
+
+        self.assertEqual(missing_csrf.status_code, 403)
+        self.assertEqual(missing_value.status_code, 422)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertNotIn(invalid_value, invalid.text)
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"][0][
+                "plus_expires_at"
+            ],
+            "2026-10-11",
+        )
+
+    def test_update_plus_expiration_keeps_old_value_when_save_fails(
+        self,
+    ) -> None:
+        self.add_account(
+            "user@example.com|password|JBSWY3DPEHPK3PXP",
+        )
+        account_id = self.client.get(
+            "/api/state"
+        ).json()["accounts"][0]["id"]
+        self.service.update_plus_expiration(account_id, "2026-10-11")
+
+        with patch.object(
+            self.service,
+            "_save_accounts",
+            side_effect=OSError("disk full"),
+        ):
+            response = self.client.patch(
+                f"/api/accounts/{account_id}/plus-expiration",
+                headers=self.headers,
+                json={"plus_expires_at": "2026-11-12"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("2026-11-12", response.text)
+        self.assertEqual(
+            self.client.get("/api/state").json()["accounts"][0][
+                "plus_expires_at"
+            ],
+            "2026-10-11",
+        )
 
     def test_update_password_rejects_blank_and_requires_csrf(self) -> None:
         self.add_account(

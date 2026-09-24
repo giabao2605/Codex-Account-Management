@@ -7,11 +7,13 @@ import type {
   DeleteResponse,
   FailoverStatusResponse,
   PasswordUpdateResponse,
+  SecretUpdateResponse,
+  PlusExpirationUpdateResponse,
   SensitiveValueResponse,
   TokenUsageResponse,
 } from "@/types/api.ts";
 
-export const EXPECTED_API_SCHEMA_VERSION = 12;
+export const EXPECTED_API_SCHEMA_VERSION = 14;
 const GENERIC_API_ERROR = "Không thể kết nối ứng dụng local.";
 const MAX_ERROR_DETAIL_LENGTH = 200;
 
@@ -94,6 +96,19 @@ export class LocalApiClient {
     );
   }
 
+  async updateSecret(
+    accountId: string,
+    secret: string,
+  ): Promise<SecretUpdateResponse> {
+    return this.request<SecretUpdateResponse>(
+      `/api/accounts/${encodeURIComponent(accountId)}/secret`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ secret }),
+      },
+    );
+  }
+
   async refresh(accountId: string | null): Promise<ActionResponse> {
     return this.request<ActionResponse>("/api/codex/refresh", {
       method: "POST",
@@ -102,6 +117,19 @@ export class LocalApiClient {
         force_token_usage: true,
       }),
     });
+  }
+
+  async updatePlusExpiration(
+    accountId: string,
+    plusExpiresAt: string | null,
+  ): Promise<PlusExpirationUpdateResponse> {
+    return this.request<PlusExpirationUpdateResponse>(
+      `/api/accounts/${encodeURIComponent(accountId)}/plus-expiration`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ plus_expires_at: plusExpiresAt }),
+      },
+    );
   }
 
   async login(accountId: string): Promise<ActionResponse> {

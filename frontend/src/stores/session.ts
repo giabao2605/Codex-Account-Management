@@ -27,7 +27,7 @@ export const useSessionStore = defineStore("session", () => {
   const lastUpdated = ref<Date | null>(null);
   let apiClient: LocalApiClient | null = null;
   let pollTimer: number | null = null;
-  let pollInFlight = false;
+  let pollInFlight: Promise<void> | null = null;
   let lastPollTick = 0;
   let countdownRemainderMilliseconds = 0;
   let millisecondsSinceStateRefresh = 0;
@@ -109,6 +109,18 @@ export const useSessionStore = defineStore("session", () => {
     return otpRemainingSeconds(account) === null ? null : account.otp;
   }
 
+  function invalidateAccountOtp(accountId: string): void {
+    if (!state.value) return;
+    state.value = {
+      ...state.value,
+      accounts: state.value.accounts.map((account) => (
+        account.id === accountId
+          ? { ...account, otp: null, otp_remaining_seconds: null }
+          : account
+      )),
+    };
+  }
+
   function pollTick(): void {
     const now = Date.now();
     const elapsedMilliseconds = Math.max(0, now - lastPollTick);
@@ -129,28 +141,34 @@ export const useSessionStore = defineStore("session", () => {
     }
   }
 
-  async function pollState(): Promise<void> {
+  async function pollState(afterCurrent = false): Promise<void> {
     if (
-      pollInFlight
-      || connectionStatus.value === "incompatible"
+      connectionStatus.value === "incompatible"
       || connectionStatus.value === "stopping"
     ) {
       return;
     }
-    pollInFlight = true;
-    try {
-      applyServerState(await getClient().state());
-      connectionStatus.value = "ready";
-      errorMessage.value = "";
-    } catch (error) {
-      connectionStatus.value = "offline";
-      errorMessage.value = userFacingError(
-        error,
-        "Không thể cập nhật trạng thái local.",
-      );
-    } finally {
-      pollInFlight = false;
+    if (pollInFlight) {
+      if (!afterCurrent) return;
+      await pollInFlight;
+      return pollState(true);
     }
+    const currentPoll = (async () => {
+      try {
+        applyServerState(await getClient().state());
+        connectionStatus.value = "ready";
+        errorMessage.value = "";
+      } catch (error) {
+        connectionStatus.value = "offline";
+        errorMessage.value = userFacingError(
+          error,
+          "Không thể cập nhật trạng thái local.",
+        );
+      }
+    })();
+    pollInFlight = currentPoll;
+    await currentPoll;
+    if (pollInFlight === currentPoll) pollInFlight = null;
   }
 
   function startPolling(intervalMilliseconds = 1_000): void {
@@ -192,6 +210,7 @@ export const useSessionStore = defineStore("session", () => {
     csrfToken,
     errorMessage,
     getClient,
+    invalidateAccountOtp,
     lastUpdated,
     otpRemainingSeconds,
     otpValue,

@@ -10,7 +10,7 @@ describe("AccountCard", () => {
     setActivePinia(createPinia());
   });
 
-  it("shows recommendation, plan, OTP, quota, sync, reset, and last-sync state", () => {
+  it("shows recommendation, plan, Plus expiration, OTP, quota, sync, reset, and last-sync state", () => {
     const account = applicationState().accounts[0]!;
     const wrapper = mount(AccountCard, {
       props: {
@@ -23,6 +23,8 @@ describe("AccountCard", () => {
     expect(wrapper.element.tagName).toBe("ARTICLE");
     expect(wrapper.text()).toContain("alpha@example.test");
     expect(wrapper.text()).toContain("Plus");
+    expect(wrapper.text()).toContain("Hết hạn Plus");
+    expect(wrapper.text()).toContain("11/10/2026");
     expect(wrapper.text()).toContain("Đề xuất sử dụng");
     expect(wrapper.text()).toContain("Còn 20 giây");
     expect(wrapper.get(".otp-progress").attributes("value")).toBe("20");
@@ -134,6 +136,9 @@ describe("AccountCard", () => {
     expect(wrapper.find('[data-action="login"]').exists()).toBe(false);
     expect(wrapper.get('[data-action="refresh"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get(".account-option-actions").text()).toContain("Secret");
+    await wrapper.get('[data-action="secret"]').trigger("click");
+    expect(wrapper.emitted("editSecret")).toHaveLength(1);
+    await wrapper.get('[data-action="options"]').trigger("click");
     expect(wrapper.get(".account-option-actions").text()).toContain("Đồng bộ");
     expect(wrapper.get(".account-option-actions").text()).toContain("Ngắt liên kết");
     expect(wrapper.get(".account-option-actions").text()).not.toContain(
@@ -143,12 +148,20 @@ describe("AccountCard", () => {
     expect(wrapper.get(".account-option-actions").text()).toContain(
       "Chỉnh sửa mật khẩu",
     );
+    expect(wrapper.get(".account-option-actions").text()).toContain(
+      "Chỉnh sửa hạn Plus",
+    );
     expect(wrapper.get(".account-option-actions").text()).toContain("Xóa tài khoản");
 
     await wrapper.get('[data-action="edit-password"]').trigger("click");
     expect(wrapper.emitted("editPassword")).toHaveLength(1);
     expect(wrapper.get('[data-action="options"]').attributes("aria-expanded"))
       .toBe("false");
+    await wrapper.get('[data-action="options"]').trigger("click");
+    await vi.dynamicImportSettled();
+    await flushPromises();
+    await wrapper.get('[data-action="edit-plus-expiration"]').trigger("click");
+    expect(wrapper.emitted("editPlusExpiration")).toHaveLength(1);
     await wrapper.get('[data-action="options"]').trigger("click");
     await vi.dynamicImportSettled();
     await flushPromises();

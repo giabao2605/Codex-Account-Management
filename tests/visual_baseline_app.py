@@ -102,6 +102,7 @@ _ACCOUNT_ROWS = [
         "quota_reset_at": "23/07 14:00",
         "banked_reset_count": 2,
         "banked_reset_expires_at": ["30/07 09:00", "Không hết hạn"],
+        "plus_expires_at": "2026-10-11",
         "quota_windows": [
             {
                 "quota_remaining": "82%",
@@ -129,6 +130,7 @@ _ACCOUNT_ROWS = [
         "quota_reset_at": "23/07 12:30",
         "banked_reset_count": 3,
         "banked_reset_expires_at": None,
+        "plus_expires_at": None,
         "quota_windows": [
             {
                 "quota_remaining": "12%",
@@ -156,6 +158,7 @@ _ACCOUNT_ROWS = [
         "quota_reset_at": "Chưa rõ",
         "banked_reset_count": None,
         "banked_reset_expires_at": None,
+        "plus_expires_at": None,
         "quota_windows": [],
         "plan_type": "Chưa rõ",
         "account_state": "Chưa xác định",
@@ -447,6 +450,13 @@ class VisualBaselineService:
 
     def update_password(self, account_id: str, password: str) -> None:
         del account_id, password
+
+    def update_plus_expiration(
+        self,
+        account_id: str,
+        plus_expires_at: str | None,
+    ) -> None:
+        del account_id, plus_expires_at
 
     def check_account(self, lines: str) -> dict[str, object]:
         stripped = lines.strip()

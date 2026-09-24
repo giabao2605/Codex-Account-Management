@@ -5,6 +5,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from app.build_info import API_SCHEMA_VERSION
 from tests.visual_baseline_app import (
     VISUAL_BASELINE_ACCESS_TOKEN,
     VISUAL_BASELINE_CSRF_TOKEN,
@@ -36,11 +37,15 @@ class VisualBaselineFixtureTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertEqual(payload["api_schema_version"], 12)
+        self.assertEqual(payload["api_schema_version"], API_SCHEMA_VERSION)
         self.assertEqual(len(payload["state"]["accounts"]), 3)
         self.assertEqual(
             payload["state"]["accounts"][0]["banked_reset_count"],
             2,
+        )
+        self.assertEqual(
+            payload["state"]["accounts"][0]["plus_expires_at"],
+            "2026-10-11",
         )
         self.assertTrue(
             all(

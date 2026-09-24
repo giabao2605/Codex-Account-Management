@@ -17,6 +17,7 @@ export interface AccountState {
   quota_windows: ReadonlyArray<QuotaWindowState>;
   banked_reset_count: number | null;
   banked_reset_expires_at: ReadonlyArray<string> | null;
+  plus_expires_at: string | null;
   plan_type: string;
   account_state: string;
   sync_status: string;
@@ -234,5 +235,13 @@ export interface SensitiveValueResponse {
 }
 
 export interface PasswordUpdateResponse {
+  updated: boolean;
+}
+
+export interface SecretUpdateResponse {
+  updated: boolean;
+}
+
+export interface PlusExpirationUpdateResponse {
   updated: boolean;
 }

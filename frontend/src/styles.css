@@ -553,7 +553,7 @@ progress::-moz-progress-bar { border-radius: 999px; background: var(--accent); }
 dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 17px 0; }
 dl div { min-width: 0; padding: 10px; border-radius: 12px; background: var(--surface-deep); }
 dt { color: var(--muted); font-size: .74rem; } dd { margin: 3px 0 0; overflow-wrap: anywhere; }
-.account-sync-details { grid-template-columns: repeat(3, 1fr); margin: 12px 0; }
+.account-sync-details { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 12px 0; }
 .account-sync-details div { min-height: 68px; padding: 9px; }
 .quota-reset-row {
   display: flex;
@@ -722,6 +722,9 @@ fieldset label { display: flex; gap: 9px; align-items: center; min-height: 31px;
 .glass-dialog-header { margin-bottom: 12px; }
 .glass-dialog-body { display: grid; gap: 12px; }
 .glass-dialog input.standard-control { width: 100%; padding: 12px; border-radius: 13px; }
+.secret-copy-row { display: flex; align-items: center; gap: 8px; }
+.secret-copy-row input { flex: 1; min-width: 0; }
+.secret-copy-row button { flex: none; min-width: 44px; min-height: 44px; display: grid; place-items: center; }
 .glass-dialog-actions { display: flex; flex-wrap: wrap; gap: 9px; justify-content: flex-end; align-items: center; margin-top: 16px; }
 .warning { color: var(--warning); }
 .error { color: var(--danger); }

@@ -17,6 +17,7 @@ export type AccountAction =
   | "login"
   | "unlink"
   | "delete"
+  | "plusExpiration"
   | "password"
   | "secret";
 
@@ -107,6 +108,26 @@ export const useAccountsStore = defineStore("accounts", () => {
     });
   }
 
+  async function updateSecret(accountId: string, secret: string): Promise<void> {
+    await withBusy(accountId, "secret", async () => {
+      await session.getClient().updateSecret(accountId, secret);
+      await session.pollState(true);
+      if (session.connectionStatus !== "ready") {
+        session.invalidateAccountOtp(accountId);
+      }
+    });
+  }
+
+  async function updatePlusExpiration(
+    accountId: string,
+    plusExpiresAt: string | null,
+  ): Promise<void> {
+    await withBusy(accountId, "plusExpiration", async () => {
+      await session.getClient().updatePlusExpiration(accountId, plusExpiresAt);
+      await session.pollState();
+    });
+  }
+
   async function checkAccount(lines: string): Promise<AccountCheckResponse> {
     return session.getClient().checkAccount(lines);
   }
@@ -133,6 +154,8 @@ export const useAccountsStore = defineStore("accounts", () => {
     lifecycle,
     refresh,
     sensitiveValue,
+    updatePlusExpiration,
     updatePassword,
+    updateSecret,
   };
 });

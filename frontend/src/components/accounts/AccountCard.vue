@@ -24,10 +24,12 @@ const emit = defineEmits<{
   copyEmail: [];
   copyOtp: [];
   copySensitive: [field: "password" | "secret"];
+  editSecret: [];
   refresh: [];
   login: [];
   unlink: [];
   editPassword: [];
+  editPlusExpiration: [];
   delete: [];
 }>();
 const optionsOpen = ref(false);
@@ -77,6 +79,12 @@ const needsLogin = computed(() => (
 const loginActionLabel = computed(() => (
   isUnlinked.value ? "Liên kết Codex" : "Đăng nhập lại"
 ));
+const plusExpirationLabel = computed(() => {
+  const value = props.account.plus_expires_at;
+  if (value === null) return "Chưa đặt";
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+});
 
 function isBusy(action: AccountAction): boolean {
   return props.busyActions.includes(action);
@@ -91,9 +99,9 @@ function copyOtp(): void {
   emit("copyOtp");
 }
 
-function copySecret(): void {
+function editSecret(): void {
   closeOptions();
-  emit("copySensitive", "secret");
+  emit("editSecret");
 }
 
 function refresh(): void {
@@ -114,6 +122,11 @@ function unlink(): void {
 function editPassword(): void {
   closeOptions();
   emit("editPassword");
+}
+
+function editPlusExpiration(): void {
+  closeOptions();
+  emit("editPlusExpiration");
 }
 
 function deleteAccount(): void {
@@ -224,6 +237,7 @@ function deleteAccount(): void {
           <strong>{{ window.quota_reset_at }}</strong>
         </dd>
       </div>
+      <div><dt>Hết hạn Plus</dt><dd>{{ plusExpirationLabel }}</dd></div>
       <div><dt>Lần đồng bộ cuối</dt><dd>{{ account.last_sync }}</dd></div>
     </dl>
 
@@ -288,7 +302,7 @@ function deleteAccount(): void {
             role="menuitem"
             data-action="secret"
             :busy="isBusy('secret')"
-            @click="copySecret"
+            @click="editSecret"
           >
             Secret
           </SurfaceActionButton>
@@ -324,6 +338,14 @@ function deleteAccount(): void {
             @click="editPassword"
           >
             Chỉnh sửa mật khẩu
+          </SurfaceActionButton>
+          <SurfaceActionButton
+            role="menuitem"
+            data-action="edit-plus-expiration"
+            :busy="isBusy('plusExpiration')"
+            @click="editPlusExpiration"
+          >
+            Chỉnh sửa hạn Plus
           </SurfaceActionButton>
           <SurfaceActionButton
             tone="danger"

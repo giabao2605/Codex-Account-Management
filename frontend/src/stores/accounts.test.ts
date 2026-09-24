@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LocalApiClient } from "@/api/client.ts";
 import { applicationState } from "@/test/fixtures.ts";
@@ -9,6 +9,11 @@ import { useSessionStore } from "./session.ts";
 describe("accounts store", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("filters account state without mutating the backend snapshot", () => {
@@ -87,5 +92,100 @@ describe("accounts store", () => {
       "1111111111111111",
       "new-password",
     );
+  });
+
+  it("updates the Plus expiration through the typed client and refreshes state", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const updatePlusExpiration = vi.fn().mockResolvedValue({ updated: true });
+    vi.spyOn(session, "getClient").mockReturnValue({
+      updatePlusExpiration,
+    } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+    const store = useAccountsStore();
+
+    await store.updatePlusExpiration("1111111111111111", "2026-10-11");
+
+    expect(updatePlusExpiration).toHaveBeenCalledWith(
+      "1111111111111111",
+      "2026-10-11",
+    );
+    expect(session.pollState).toHaveBeenCalledOnce();
+    expect(store.isBusy("1111111111111111", "plusExpiration")).toBe(false);
+  });
+
+  it("refreshes the account OTP after updating its secret", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    session.connectionStatus = "ready";
+    const updateSecret = vi.fn().mockResolvedValue({ updated: true });
+    vi.spyOn(session, "getClient").mockReturnValue({
+      updateSecret,
+    } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+
+    await useAccountsStore().updateSecret("1111111111111111", "KRUGS4ZANFZSAYJA");
+
+    expect(updateSecret).toHaveBeenCalledWith("1111111111111111", "KRUGS4ZANFZSAYJA");
+    expect(session.pollState).toHaveBeenCalledWith(true);
+  });
+
+  it("hides a stale OTP when the post-save state refresh fails", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    session.connectionStatus = "offline";
+    vi.spyOn(session, "getClient").mockReturnValue({
+      updateSecret: vi.fn().mockResolvedValue({ updated: true }),
+    } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+
+    await useAccountsStore().updateSecret("1111111111111111", "KRUGS4ZANFZSAYJA");
+
+    expect(session.state?.accounts[0]?.otp).toBeNull();
+    expect(session.state?.accounts[0]?.otp_remaining_seconds).toBeNull();
+  });
+
+  it("gets a fresh OTP after a secret save races with an existing poll", async () => {
+    const session = useSessionStore();
+    const oldState = applicationState();
+    const newState = applicationState();
+    newState.accounts[0] = { ...newState.accounts[0]!, otp: "654321" };
+    let finishOldPoll!: (value: Response) => void;
+    const oldPollResponse = new Promise<Response>((resolve) => {
+      finishOldPoll = resolve;
+    });
+    let stateRequests = 0;
+    const jsonResponse = (value: unknown) => new Response(JSON.stringify(value), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetchMock = vi.fn((path: string) => {
+      if (path === "/api/bootstrap") return Promise.resolve(jsonResponse({
+        api_schema_version: 14,
+        build_id: "test-build",
+        csrf_token: "csrf-token",
+        state: oldState,
+      }));
+      if (path.endsWith("/secret")) {
+        return Promise.resolve(jsonResponse({ updated: true }));
+      }
+      stateRequests += 1;
+      return stateRequests === 1
+        ? oldPollResponse
+        : Promise.resolve(jsonResponse(newState));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await session.bootstrap("access-token");
+
+    const oldPoll = session.pollState();
+    const save = useAccountsStore().updateSecret("1111111111111111", "KRUGS4ZANFZSAYJA");
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith("/secret"))).toBe(true);
+    });
+    finishOldPoll(jsonResponse(oldState));
+    await Promise.all([oldPoll, save]);
+
+    expect(stateRequests).toBe(2);
+    expect(session.state?.accounts[0]?.otp).toBe("654321");
   });
 });

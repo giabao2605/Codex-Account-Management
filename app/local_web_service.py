@@ -45,11 +45,14 @@ from .otp_codex_manager_with_account_status import (
     build_codex_environment,
     create_totp,
     decrypt_text,
+    decrypt_optional_plus_expiration,
     detect_banned_account,
     encrypt_text,
     extract_best_rate_limit,
     format_cycle,
     format_reset_time,
+    normalize_secret,
+    parse_plus_expiration,
     profile_directory_for,
     protect_sensitive_path,
     protect_sensitive_tree,
@@ -342,6 +345,11 @@ class LocalWebService:
                         if info.banked_reset_expires_at is not None
                         else None
                     ),
+                    "plus_expires_at": (
+                        account.plus_expires_at.isoformat()
+                        if account.plus_expires_at is not None
+                        else None
+                    ),
                     "plan_type": info.plan_type,
                     "account_state": info.account_state,
                     "sync_status": info.status,
@@ -580,6 +588,58 @@ class LocalWebService:
                 account = self._find_account_locked(account_id)
                 new_accounts = tuple(
                     replace(item, password=password)
+                    if item is account
+                    else item
+                    for item in self._accounts
+                )
+
+            self._save_accounts(new_accounts)
+
+            with self._lock:
+                self._accounts = new_accounts
+
+        return True
+
+    def update_secret(self, account_id: str, secret: str) -> bool:
+        if len(secret) > 256:
+            raise ValueError("2FA Secret không được dài quá 256 ký tự.")
+        normalized = normalize_secret(secret)
+        totp = create_totp(normalized)
+
+        with self._account_write_lock:
+            with self._lock:
+                account = self._find_account_locked(account_id)
+                if any(
+                    item is not account and item.secret == normalized
+                    for item in self._accounts
+                ):
+                    raise AccountConflictError("secret")
+                new_accounts = tuple(
+                    replace(item, secret=normalized, totp=totp)
+                    if item is account
+                    else item
+                    for item in self._accounts
+                )
+
+            self._save_accounts(new_accounts)
+
+            with self._lock:
+                self._accounts = new_accounts
+
+        return True
+
+    def update_plus_expiration(
+        self,
+        account_id: str,
+        plus_expires_at: str | None,
+    ) -> bool:
+        expiration = parse_plus_expiration(plus_expires_at)
+
+        with self._account_write_lock:
+            with self._lock:
+                account = self._find_account_locked(account_id)
+                new_accounts = tuple(
+                    replace(item, plus_expires_at=expiration)
                     if item is account
                     else item
                     for item in self._accounts
@@ -1049,6 +1109,9 @@ class LocalWebService:
                 email = decrypt_text(item["email"])
                 password = decrypt_text(item["password"])
                 secret = decrypt_text(item["secret"])
+                plus_expires_at = decrypt_optional_plus_expiration(
+                    item.get("plus_expires_at")
+                )
                 email_key = email.casefold()
 
                 if (
@@ -1063,6 +1126,7 @@ class LocalWebService:
                         password=password,
                         secret=secret,
                         totp=create_totp(secret),
+                        plus_expires_at=plus_expires_at,
                     )
                 )
                 seen_emails.add(email_key)
@@ -1083,6 +1147,11 @@ class LocalWebService:
                     "email": encrypt_text(account.email),
                     "password": encrypt_text(account.password),
                     "secret": encrypt_text(account.secret),
+                    "plus_expires_at": (
+                        encrypt_text(account.plus_expires_at.isoformat())
+                        if account.plus_expires_at is not None
+                        else None
+                    ),
                 }
                 for account in accounts
             ],

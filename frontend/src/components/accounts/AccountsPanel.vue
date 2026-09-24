@@ -22,12 +22,19 @@ const importOpen = ref(false);
 const passwordAccount = ref<AccountState | null>(null);
 const updatedPassword = ref("");
 const passwordSaving = ref(false);
+const secretAccount = ref<AccountState | null>(null);
+const updatedSecret = ref("");
+const secretSaving = ref(false);
+const plusExpirationAccount = ref<AccountState | null>(null);
+const updatedPlusExpiration = ref("");
+const plusExpirationSaving = ref(false);
 const importMorphId = "import-account-dialog";
 const actionTypes: AccountAction[] = [
   "refresh",
   "login",
   "unlink",
   "delete",
+  "plusExpiration",
   "password",
   "secret",
 ];
@@ -131,6 +138,46 @@ function openPasswordEditor(account: AccountState): void {
   passwordAccount.value = account;
 }
 
+function openSecretEditor(account: AccountState): void {
+  updatedSecret.value = "";
+  secretAccount.value = account;
+}
+
+function closeSecretEditor(): void {
+  if (secretSaving.value) return;
+  updatedSecret.value = "";
+  secretAccount.value = null;
+}
+
+async function copyCurrentSecret(): Promise<void> {
+  if (secretAccount.value) {
+    await copySensitive(secretAccount.value, "secret");
+  }
+}
+
+async function saveSecret(): Promise<void> {
+  const account = secretAccount.value;
+  const secret = updatedSecret.value;
+  if (
+    secretSaving.value || !account || !secret.trim()
+    || accounts.isBusy(account.id, "secret")
+  ) return;
+
+  secretSaving.value = true;
+  try {
+    await accounts.updateSecret(account.id, secret);
+    feedback.success(session.connectionStatus === "ready"
+      ? "Đã cập nhật secret 2FA và mã OTP."
+      : "Đã lưu secret 2FA. Mã OTP sẽ hiện khi kết nối lại.");
+    updatedSecret.value = "";
+    secretAccount.value = null;
+  } catch (error) {
+    feedback.error(userFacingError(error, "Không thể cập nhật secret 2FA."));
+  } finally {
+    secretSaving.value = false;
+  }
+}
+
 function closePasswordEditor(): void {
   if (passwordSaving.value) return;
   updatedPassword.value = "";
@@ -152,6 +199,40 @@ async function savePassword(): Promise<void> {
     feedback.error(userFacingError(error, "Không thể cập nhật mật khẩu."));
   } finally {
     passwordSaving.value = false;
+  }
+}
+
+function openPlusExpirationEditor(account: AccountState): void {
+  updatedPlusExpiration.value = account.plus_expires_at ?? "";
+  plusExpirationAccount.value = account;
+}
+
+function closePlusExpirationEditor(): void {
+  if (plusExpirationSaving.value) return;
+  updatedPlusExpiration.value = "";
+  plusExpirationAccount.value = null;
+}
+
+async function savePlusExpiration(): Promise<void> {
+  const account = plusExpirationAccount.value;
+  if (plusExpirationSaving.value || !account) return;
+
+  plusExpirationSaving.value = true;
+  try {
+    await accounts.updatePlusExpiration(
+      account.id,
+      updatedPlusExpiration.value || null,
+    );
+    feedback.success("Đã cập nhật ngày hết hạn Plus.");
+    updatedPlusExpiration.value = "";
+    plusExpirationAccount.value = null;
+  } catch (error) {
+    feedback.error(userFacingError(
+      error,
+      "Không thể cập nhật ngày hết hạn Plus.",
+    ));
+  } finally {
+    plusExpirationSaving.value = false;
   }
 }
 
@@ -213,10 +294,12 @@ async function savePassword(): Promise<void> {
         @copy-email="copy(account.email, 'email')"
         @copy-otp="copy(account.otp, 'OTP')"
         @copy-sensitive="copySensitive(account, $event)"
+        @edit-secret="openSecretEditor(account)"
         @refresh="refresh(account.id)"
         @login="lifecycle(account, 'login')"
         @unlink="lifecycle(account, 'unlink')"
         @edit-password="openPasswordEditor(account)"
+        @edit-plus-expiration="openPlusExpirationEditor(account)"
         @delete="remove(account)"
       />
     </div>
@@ -257,6 +340,101 @@ async function savePassword(): Promise<void> {
           :busy="passwordSaving"
           :disabled="!updatedPassword.trim()"
           @click="savePassword"
+        >
+          Lưu
+        </SurfaceActionButton>
+      </template>
+    </GlassDialog>
+    <GlassDialog
+      v-if="secretAccount !== null"
+      :open="true"
+      title="Secret 2FA"
+      @close="closeSecretEditor"
+    >
+      <label for="current-secret">Secret hiện tại</label>
+      <div class="secret-copy-row">
+        <input
+          id="current-secret"
+          class="standard-control"
+          type="text"
+          value="Đã lưu trong ứng dụng"
+          readonly
+          tabindex="-1"
+        >
+        <SurfaceActionButton
+          data-action="copy-secret"
+          :busy="accounts.isBusy(secretAccount.id, 'secret')"
+          :disabled="secretSaving"
+          :aria-label="`Sao chép secret của ${secretAccount.email}`"
+          title="Sao chép secret"
+          @click="copyCurrentSecret"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="8" y="8" width="11" height="11" rx="2" />
+            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+          </svg>
+        </SurfaceActionButton>
+      </div>
+      <label for="updated-secret">Secret mới</label>
+      <input
+        id="updated-secret"
+        v-model="updatedSecret"
+        name="updated-secret"
+        type="password"
+        class="standard-control"
+        autocomplete="new-password"
+        spellcheck="false"
+        autocapitalize="off"
+        maxlength="256"
+        @keydown.enter="saveSecret"
+      >
+      <template #actions>
+        <SurfaceActionButton :disabled="secretSaving" @click="closeSecretEditor">Hủy</SurfaceActionButton>
+        <SurfaceActionButton
+          data-action="save-secret"
+          :busy="secretSaving"
+          :disabled="!updatedSecret.trim() || accounts.isBusy(secretAccount.id, 'secret')"
+          @click="saveSecret"
+        >
+          Lưu
+        </SurfaceActionButton>
+      </template>
+    </GlassDialog>
+    <GlassDialog
+      v-if="plusExpirationAccount !== null"
+      :open="true"
+      title="Chỉnh sửa hạn Plus"
+      @close="closePlusExpirationEditor"
+    >
+      <label for="updated-plus-expiration">
+        Ngày hết hạn Plus cho {{ plusExpirationAccount?.email }}
+      </label>
+      <input
+        id="updated-plus-expiration"
+        v-model="updatedPlusExpiration"
+        name="updated-plus-expiration"
+        type="date"
+        class="standard-control"
+        data-material="standard-control"
+        autocomplete="off"
+        aria-describedby="plus-expiration-update-note"
+        @keydown.enter="savePlusExpiration"
+      >
+      <p id="plus-expiration-update-note">
+        Đây là ngày tự nhập. Codex chỉ trả loại gói, không trả ngày hết hạn.
+        Xóa ngày để đặt lại thành chưa rõ.
+      </p>
+      <template #actions>
+        <SurfaceActionButton
+          :disabled="plusExpirationSaving"
+          @click="closePlusExpirationEditor"
+        >
+          Hủy
+        </SurfaceActionButton>
+        <SurfaceActionButton
+          data-action="save-plus-expiration"
+          :busy="plusExpirationSaving"
+          @click="savePlusExpiration"
         >
           Lưu
         </SurfaceActionButton>

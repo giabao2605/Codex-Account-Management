@@ -66,7 +66,7 @@ describe("production App", () => {
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            api_schema_version: 12,
+            api_schema_version: 14,
             build_id: "production-build",
             csrf_token: "csrf-token",
             state: {
@@ -182,7 +182,7 @@ describe("production App", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          api_schema_version: 12,
+          api_schema_version: 14,
           build_id: "production-build",
           csrf_token: "csrf-token",
           state: applicationState(),

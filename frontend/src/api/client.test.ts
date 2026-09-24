@@ -127,6 +127,8 @@ describe("LocalApiClient", () => {
     await client.addAccount("alpha@example.test|password|secret");
     await client.sensitiveValue("1111111111111111", "password");
     await client.updatePassword("1111111111111111", "new-password");
+    await client.updateSecret("1111111111111111", "KRUGS4ZANFZSAYJA");
+    await client.updatePlusExpiration("1111111111111111", "2026-10-11");
     await client.refresh("1111111111111111");
     await client.login("1111111111111111");
     await client.unlink("1111111111111111");
@@ -143,6 +145,8 @@ describe("LocalApiClient", () => {
       "/api/accounts/import",
       "/api/accounts/1111111111111111/sensitive",
       "/api/accounts/1111111111111111/password",
+      "/api/accounts/1111111111111111/secret",
+      "/api/accounts/1111111111111111/plus-expiration",
       "/api/codex/refresh",
       "/api/codex/1111111111111111/login",
       "/api/codex/1111111111111111/unlink",
@@ -155,6 +159,20 @@ describe("LocalApiClient", () => {
     expect(passwordCall[1]).toEqual(expect.objectContaining({
       method: "PATCH",
       body: JSON.stringify({ password: "new-password" }),
+    }));
+    const secretCall = fetchMock.mock.calls.find(
+      ([path]) => path === "/api/accounts/1111111111111111/secret",
+    )!;
+    expect(secretCall[1]).toEqual(expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ secret: "KRUGS4ZANFZSAYJA" }),
+    }));
+    const plusExpirationCall = fetchMock.mock.calls.find(
+      ([path]) => path === "/api/accounts/1111111111111111/plus-expiration",
+    )!;
+    expect(plusExpirationCall[1]).toEqual(expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ plus_expires_at: "2026-10-11" }),
     }));
 
     const mutationCalls = fetchMock.mock.calls.filter(([, init]) => (

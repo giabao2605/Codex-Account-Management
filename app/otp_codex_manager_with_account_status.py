@@ -11,12 +11,13 @@ import time
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
 import pyotp
 import ntsecuritycon
+import pywintypes
 import win32api
 import win32con
 import win32crypt
@@ -127,6 +128,7 @@ class Account:
     password: str
     secret: str
     totp: pyotp.TOTP
+    plus_expires_at: date | None = None
 
 
 @dataclass
@@ -530,6 +532,34 @@ def format_reset_time(timestamp: object) -> str:
     return datetime.fromtimestamp(
         value
     ).strftime("%d/%m %H:%M")
+
+
+def parse_plus_expiration(value: object) -> date | None:
+    """Parse the optional manually recorded ChatGPT Plus expiration date."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) != 10:
+        raise ValueError("Ngày hết hạn Plus không hợp lệ.")
+
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("Ngày hết hạn Plus không hợp lệ.") from error
+
+    if parsed.isoformat() != value:
+        raise ValueError("Ngày hết hạn Plus không hợp lệ.")
+    return parsed
+
+
+def decrypt_optional_plus_expiration(value: object) -> date | None:
+    """Read an optional legacy-safe Plus expiration from encrypted storage."""
+    if not isinstance(value, str):
+        return None
+
+    try:
+        return parse_plus_expiration(decrypt_text(value))
+    except (pywintypes.error, ValueError):
+        return None
 
 
 
@@ -1269,6 +1299,11 @@ class OTPManagerApp:
                     "secret": encrypt_text(
                         account.secret
                     ),
+                    "plus_expires_at": (
+                        encrypt_text(account.plus_expires_at.isoformat())
+                        if account.plus_expires_at is not None
+                        else None
+                    ),
                 }
             )
 
@@ -1330,6 +1365,9 @@ class OTPManagerApp:
                             item["secret"]
                         )
                     )
+                    plus_expires_at = decrypt_optional_plus_expiration(
+                        item.get("plus_expires_at")
+                    )
 
                     email_key = email.casefold()
 
@@ -1346,6 +1384,7 @@ class OTPManagerApp:
                             password=password,
                             secret=secret,
                             totp=create_totp(secret),
+                            plus_expires_at=plus_expires_at,
                         )
                     )
 

@@ -15,6 +15,8 @@ import AccountCard from "./AccountCard.vue";
 import AccountOverview from "./AccountOverview.vue";
 import ImportDialog from "./ImportDialog.vue";
 
+defineProps<{ actionsTarget?: string }>();
+
 const accounts = useAccountsStore();
 const feedback = useFeedbackStore();
 const session = useSessionStore();
@@ -253,7 +255,8 @@ async function savePlusExpiration(): Promise<void> {
           Tổng tài khoản: {{ session.state?.accounts.length ?? 0 }}
         </h2>
       </div>
-      <div class="panel-actions">
+      <Teleport :to="actionsTarget ?? 'body'" :disabled="!actionsTarget">
+        <div class="panel-actions">
         <GlassButton
           variant="quiet"
           :busy="accounts.isBusy('all-accounts', 'refresh')"
@@ -276,7 +279,8 @@ async function savePlusExpiration(): Promise<void> {
             </GlassButton>
           </template>
         </ImportDialog>
-      </div>
+        </div>
+      </Teleport>
     </div>
     <div class="account-plan-filters" role="group" aria-label="Lọc theo gói">
       <GlassButton

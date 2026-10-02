@@ -179,8 +179,8 @@
 }
 
 .glass-surface[data-glass-version="3"]
-  > :where(:not(.glass-hybrid-overlay)),
-.glass-button[data-glass-version="3"] > * {
+  > :where(:not(.glass-hybrid-overlay, .sr-only)),
+.glass-button[data-glass-version="3"] > :not(.sr-only) {
   position: relative;
   z-index: 1;
 }

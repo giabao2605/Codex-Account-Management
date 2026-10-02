@@ -88,8 +88,14 @@ button:focus-visible, textarea:focus-visible, select:focus-visible {
 .shell { width: min(1440px, calc(100% - 48px)); margin: 0 auto; padding: 30px 0 64px; }
 .topbar { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: start; }
 .app-content-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   padding: 8px 0 20px;
 }
+.app-content-header h1 { min-width: 0; }
+.app-content-header .connection { flex-shrink: 0; white-space: nowrap; }
 .command-scroll-sentinel {
   width: 1px;
   height: 1px;
@@ -101,7 +107,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible {
   z-index: 30;
   isolation: isolate;
   display: grid;
-  grid-template-columns: minmax(340px, 1fr) auto auto;
+  grid-template-columns: minmax(340px, 1fr) auto;
   gap: 10px;
   align-items: center;
   margin: 0 -8px;
@@ -143,7 +149,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible {
   );
 }
 .app-system-controls {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 .app-command-layer .connection {
   white-space: nowrap;
@@ -199,7 +205,7 @@ h3 { font-size: 1.06rem; }
   padding: 7px;
   border-radius: 19px;
 }
-.workspace-tabs { min-width: 420px; }
+.workspace-tabs { min-width: 0; }
 .glass-segmented-control button {
   min-height: 42px; flex: 1; border: 0; border-radius: 13px; padding: 0 16px;
   color: var(--muted); background: transparent; cursor: pointer;
@@ -621,7 +627,12 @@ dt { color: var(--muted); font-size: .74rem; } dd { margin: 3px 0 0; overflow-wr
   width: 44px;
   min-width: 44px;
 }
-.account-options-popover [data-action="options"] { padding-inline: 0; }
+.account-options-popover .glass-button[data-action="options"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0;
+}
 .account-options-glyph {
   display: inline-block;
   letter-spacing: .08em;
@@ -1052,6 +1063,9 @@ textarea {
 }
 @keyframes theme-fade-in {
   from { opacity: 0; filter: saturate(.9) brightness(1.02); }
+}
+@media (max-width: 960px) {
+  .app-command-layer { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
   .shell { width: min(100% - 32px, 1440px); }

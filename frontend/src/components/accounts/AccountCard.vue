@@ -256,7 +256,7 @@ function deleteAccount(): void {
         :title="`Đặt lại quota ${window.quota_cycle}: ${window.quota_reset_at}`"
       >
         <span class="account-meta-icon" aria-hidden="true">⟳</span>
-        <span>{{ quotaWindows.length > 1 ? window.quota_cycle : "Reset" }}</span>
+        <span>{{ quotaWindows.length > 1 ? window.quota_cycle : accountPlan(account) === "free" ? "Monthly" : "Reset" }}</span>
         <strong>{{ window.quota_reset_at }}</strong>
       </span>
     </div>

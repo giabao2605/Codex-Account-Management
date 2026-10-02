@@ -116,7 +116,7 @@ describe("production App", () => {
     expect(commandLayer.attributes("data-over-content")).toBe("true");
     expect(commandLayer.find(".workspace-tabs").exists()).toBe(true);
     expect(commandLayer.find(".app-system-controls").exists()).toBe(true);
-    expect(commandLayer.find(".connection").attributes("data-surface")).toBe(
+    expect(wrapper.get(".app-content-header .connection").attributes("data-surface")).toBe(
       "standard",
     );
 

@@ -112,6 +112,14 @@ onBeforeUnmount(() => {
     <main class="shell">
       <header class="app-content-header">
         <h1>Tài khoản Codex</h1>
+        <span
+          class="connection"
+          :class="`is-${session.connectionStatus}`"
+          data-surface="standard"
+          aria-live="polite"
+        >
+          {{ connectionLabel }}
+        </span>
       </header>
 
       <div
@@ -134,7 +142,9 @@ onBeforeUnmount(() => {
         />
         <div class="header-actions app-system-controls">
           <AppearancePopover />
+          <div id="account-command-actions" v-show="activeTab === 'accounts'" />
           <GlassButton
+            v-show="false"
             variant="danger"
             :busy="shutdownBusy"
             :disabled="session.connectionStatus !== 'ready'"
@@ -143,14 +153,6 @@ onBeforeUnmount(() => {
             Tắt ứng dụng
           </GlassButton>
         </div>
-        <span
-          class="connection"
-          :class="`is-${session.connectionStatus}`"
-          data-surface="standard"
-          aria-live="polite"
-        >
-          {{ connectionLabel }}
-        </span>
       </nav>
 
       <OfflineBanner v-if="session.connectionStatus === 'offline'" />
@@ -171,7 +173,7 @@ onBeforeUnmount(() => {
           :data-active="activeTab === 'accounts'"
           :inert="activeTab !== 'accounts'"
         >
-          <AccountsPanel />
+          <AccountsPanel actions-target="#account-command-actions" />
         </section>
         <section
           id="usage-panel"

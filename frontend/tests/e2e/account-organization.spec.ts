@@ -31,6 +31,12 @@ test("uses a flat status-sorted list with hidden Plus expiration and no search",
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/#visual-baseline-access-token");
   await expect(page.locator(".account-card")).toHaveCount(7);
+  await expect(page.locator(".app-content-header .connection")).toHaveText("Đã kết nối");
+  await expect(page.getByRole("button", { name: "Tắt ứng dụng" })).toBeHidden();
+  await expect(page.locator("#account-command-actions").getByRole("button", { name: "Làm mới tất cả" })).toBeVisible();
+  await page.locator("#account-command-actions").getByRole("button", { name: "Thêm tài khoản" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.locator(".account-plan-group")).toHaveCount(0);
   await expect(page.locator(".account-grid")).toHaveCount(1);
   await expect(page.locator(".subtitle, .account-list-summary")).toHaveCount(0);
@@ -44,6 +50,25 @@ test("uses a flat status-sorted list with hidden Plus expiration and no search",
   await expect(page.locator("#account-empty .status")).toHaveText("Hết quota");
   await expect(page.locator("#account-team .status")).toHaveText("Cần đăng nhập");
   await expect(page.locator("#account-free")).not.toContainText("Hết hạn Plus");
+  for (const width of [1440, 1200, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const card = page.locator("#account-free");
+    const options = card.locator('[data-action="options"]');
+    await expect(options.locator(".sr-only")).toHaveCSS("position", "absolute");
+    const emailBox = await card.locator('[data-action="email"]').boundingBox();
+    const optionsBox = await options.boundingBox();
+    expect(optionsBox!.height).toBe(emailBox!.height);
+    expect(optionsBox!.y).toBe(emailBox!.y);
+    const glyphBox = await options.locator(".account-options-glyph").boundingBox();
+    expect(Math.abs(glyphBox!.x + glyphBox!.width / 2 - optionsBox!.x - optionsBox!.width / 2)).toBeLessThan(1);
+    expect(await card.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const commandBox = await page.locator(".app-command-layer").boundingBox();
+    for (const button of await page.locator(".app-command-layer button:visible").all()) {
+      const box = await button.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(commandBox!.x + commandBox!.width + 1);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("button", { name: /Team \/ Business/ }).click();
   await expect(page.locator(".account-card")).toHaveCount(1);
   await page.getByRole("button", { name: /Tất cả gói/ }).click();

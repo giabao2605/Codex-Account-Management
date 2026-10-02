@@ -74,6 +74,9 @@ const displayStatus = computed(() => {
     ? "Chưa rõ quota" : accountStatuses[status].label;
   return { ...accountStatuses[status], label };
 });
+const compactStatusLabel = computed(() => (
+  displayStatus.value.tone === "normal" ? "Dùng" : displayStatus.value.label
+));
 const isPlus = computed(() => accountPlan(props.account) === "plus");
 const connectionStatus = computed(() => normalizedStatus(props.account));
 const isUnlinked = computed(() => (
@@ -166,7 +169,7 @@ function deleteAccount(): void {
         :class="`is-${displayStatus.tone}`"
         :title="account.account_state"
       >
-        {{ displayStatus.label }}
+        {{ compactStatusLabel }}
       </span>
     </header>
 
@@ -233,20 +236,34 @@ function deleteAccount(): void {
       </section>
     </div>
 
-    <dl class="account-sync-details">
+    <div
+      class="account-meta-strip"
+      role="group"
+      :aria-label="`Thông tin đồng bộ và đặt lại quota của ${account.email}`"
+    >
+      <span
+        class="account-meta-item sync-meta"
+        :title="`Trạng thái đồng bộ: ${account.sync_status}`"
+      >
+        <span class="account-meta-icon" aria-hidden="true">↻</span>
+        <span>Sync</span>
+        <strong>{{ account.last_sync }}</strong>
+      </span>
+      <span
+        v-for="window in quotaWindows"
+        :key="`${window.quota_cycle}-${window.quota_reset_at}`"
+        class="account-meta-item quota-reset-row"
+        :title="`Đặt lại quota ${window.quota_cycle}: ${window.quota_reset_at}`"
+      >
+        <span class="account-meta-icon" aria-hidden="true">⟳</span>
+        <span>{{ quotaWindows.length > 1 ? window.quota_cycle : "Reset" }}</span>
+        <strong>{{ window.quota_reset_at }}</strong>
+      </span>
+    </div>
+
+    <dl class="account-sync-details sr-only">
       <div><dt>Tài khoản</dt><dd>{{ account.account_state }}</dd></div>
       <div><dt>Đồng bộ</dt><dd>{{ account.sync_status }}</dd></div>
-      <div class="quota-reset-details">
-        <dt>Đặt lại quota</dt>
-        <dd
-          v-for="window in quotaWindows"
-          :key="`${window.quota_cycle}-${window.quota_reset_at}`"
-          class="quota-reset-row"
-        >
-          <span>{{ window.quota_cycle }}</span>
-          <strong>{{ window.quota_reset_at }}</strong>
-        </dd>
-      </div>
       <div v-if="isPlus" v-show="false"><dt>Hết hạn Plus</dt><dd>{{ plusExpirationLabel }}</dd></div>
       <div><dt>Lần đồng bộ cuối</dt><dd>{{ account.last_sync }}</dd></div>
     </dl>
@@ -291,7 +308,8 @@ function deleteAccount(): void {
             :aria-expanded="optionsOpen"
             :aria-controls="optionsId"
           >
-            Tùy chọn
+            <span class="account-options-glyph" aria-hidden="true">•••</span>
+            <span class="sr-only">Tùy chọn</span>
           </GlassButton>
         </template>
         <div

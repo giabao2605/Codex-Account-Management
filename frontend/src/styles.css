@@ -88,9 +88,8 @@ button:focus-visible, textarea:focus-visible, select:focus-visible {
 .shell { width: min(1440px, calc(100% - 48px)); margin: 0 auto; padding: 30px 0 64px; }
 .topbar { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: start; }
 .app-content-header {
-  padding: 8px 4px 24px;
+  padding: 8px 0 20px;
 }
-.app-content-header .subtitle { max-width: 680px; }
 .command-scroll-sentinel {
   width: 1px;
   height: 1px;
@@ -154,8 +153,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -.025em; }
 h1 { font-size: clamp(2.15rem, 4vw, 3.15rem); line-height: 1; }
 h2 { font-size: clamp(1.65rem, 4vw, 2.25rem); }
 h3 { font-size: 1.06rem; }
-.subtitle, .account-card p, .glass-dialog p { color: var(--muted); }
-.subtitle { max-width: 620px; margin: 10px 0 0; }
+.account-card p, .glass-dialog p { color: var(--muted); }
 .header-actions, .panel-actions, .account-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .connection { min-height: 44px; display: grid; place-items: center; padding: 0 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
 .connection.is-ready {
@@ -235,6 +233,7 @@ h3 { font-size: 1.06rem; }
   pointer-events: auto;
 }
 .panel-heading { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 18px; }
+.accounts-heading { align-items: center; margin-bottom: 16px; }
 .panel-heading-actions-only { justify-content: flex-end; }
 .recommendation, .notice, .fatal, .empty {
   padding: 14px 16px; border: 1px solid var(--line); border-radius: 15px; color: var(--muted); background: var(--surface);
@@ -305,6 +304,21 @@ h3 { font-size: 1.06rem; }
   gap: 10px;
   margin: 0 0 14px;
 }
+.account-plan-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.account-plan-filters [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.account-plan-count {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+}
 .account-smart-queue {
   display: grid;
   gap: 12px;
@@ -366,13 +380,13 @@ h3 { font-size: 1.06rem; }
 .account-filter-control .glass-select-label { display: none; }
 .account-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
 .account-card {
   display: grid;
-  grid-template-rows: 56px auto auto auto;
+  grid-template-rows: minmax(56px, auto) auto auto auto;
   padding: 18px;
   border-radius: 20px;
   background: var(--panel-background);
@@ -518,6 +532,8 @@ h3 { font-size: 1.06rem; }
 }
 .otp-copy-button:disabled {
   color: var(--muted);
+  font-size: .9rem;
+  letter-spacing: normal;
   cursor: not-allowed;
 }
 .otp-validity {
@@ -1005,6 +1021,15 @@ textarea {
   from { opacity: 0; filter: saturate(.9) brightness(1.02); }
 }
 @media (max-width: 760px) {
+  .shell { width: min(100% - 32px, 1440px); }
+  .app-command-layer {
+    grid-template-columns: 1fr;
+    margin: 0;
+  }
+  .app-system-controls,
+  .app-command-layer .connection {
+    justify-self: start;
+  }
   .topbar, .account-grid { grid-template-columns: 1fr; }
   .header-actions { grid-column: 1; }
   .panel-heading, .usage-controls { align-items: stretch; flex-direction: column; }
@@ -1015,7 +1040,10 @@ textarea {
   .quota-summary { grid-template-columns: 1fr 1fr; }
   .banked-reset-heading { align-items: start; flex-direction: column; }
   .banked-reset-heading > p { text-align: left; }
-  .workspace-tabs { min-width: 360px; }
+  .workspace-tabs {
+    width: 100%;
+    min-width: 0;
+  }
   .failover-metrics { grid-template-columns: 1fr 1fr; }
   .quota-primary-card { grid-column: 1 / -1; }
 }

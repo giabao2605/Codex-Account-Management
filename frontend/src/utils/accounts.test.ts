@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { AccountState, ApplicationState } from "@/types/api.ts";
 import {
   accountMatchesFilter,
+  accountPlan,
+  accountStatus,
+  compareAccounts,
   needsAttention,
   parseQuotaPercent,
   syncMetrics,
@@ -30,6 +33,48 @@ function account(overrides: Partial<AccountState> = {}): AccountState {
 }
 
 describe("account parity utilities", () => {
+  it("groups plan aliases without guessing unknown or other plans", () => {
+    expect(["PLUS", "Team workspace", "Business Standard", "Free plan", "Pro", "—"]
+      .map((plan_type) => accountPlan(account({ plan_type }))))
+      .toEqual(["plus", "team", "team", "free", "other", "unknown"]);
+  });
+
+  it("uses all quota windows and puts login or errors ahead of cached quota", () => {
+    const windows = [
+      { quota_remaining: "0%", quota_cycle: "5 giờ", quota_reset_at: "—" },
+      { quota_remaining: "82%", quota_cycle: "Weekly", quota_reset_at: "—" },
+    ];
+    const exhausted = account({ quota_windows: windows });
+    const login = account({ sync_status: "Cần đăng nhập" });
+    expect(accountStatus(exhausted)).toBe("empty");
+    expect(accountMatchesFilter(exhausted, "usable")).toBe(false);
+    expect(accountMatchesFilter(exhausted, "quota-empty")).toBe(true);
+    expect(accountStatus(login)).toBe("login");
+    expect(accountMatchesFilter(login, "quota-available")).toBe(false);
+    expect(accountStatus(account({ sync_status: "Lỗi tạm thời" }))).toBe("error");
+    expect(accountStatus(account({ sync_status: "Chưa liên kết" }))).toBe("unlinked");
+    expect(accountStatus(account({ quota_remaining: "12%" }))).toBe("low");
+    expect(accountStatus(account({ quota_remaining: "—" }))).toBe("unknown");
+    expect(accountStatus(account({ account_state: "Chưa xác định" }))).toBe("unknown");
+    expect(accountStatus(account({ quota_windows: [
+      { ...windows[0]!, quota_remaining: "—" }, windows[1]!,
+    ] }))).toBe("unknown");
+  });
+
+  it("orders usable accounts by quota with stable email ties without mutating input", () => {
+    const rows = [
+      account({ id: "login", sync_status: "Cần đăng nhập" }),
+      account({ id: "low", quota_remaining: "12%" }),
+      account({ id: "ready", quota_remaining: "90%" }),
+      account({ id: "empty", quota_remaining: "0%" }),
+    ];
+    expect([...rows].sort((a, b) => compareAccounts(a, b, "status"))
+      .map((row) => row.id)).toEqual(["ready", "low", "empty", "login"]);
+    expect(rows[0]!.id).toBe("login");
+    expect(compareAccounts(account({ email: "a@example.test" }),
+      account({ email: "z@example.test" }), "email")).toBeLessThan(0);
+  });
+
   it("parses and clamps quota percentages", () => {
     expect(parseQuotaPercent("82,5%")).toBe(82.5);
     expect(parseQuotaPercent("-1%")).toBe(0);

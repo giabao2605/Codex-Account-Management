@@ -103,6 +103,7 @@ describe("production App", () => {
     expect(wrapper.get(".app-content-header").text()).toContain(
       "Tài khoản Codex",
     );
+    expect(wrapper.find(".subtitle").exists()).toBe(false);
     const commandLayer = wrapper.get(".app-command-layer");
     expect(commandLayer.attributes("aria-label")).toBe(
       "Điều khiển ứng dụng",

@@ -19,6 +19,39 @@ describe("AccountsPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses one status-sorted list with plan filters and no email search", async () => {
+    const session = useSessionStore();
+    const base = applicationState().accounts[0]!;
+    session.state = { ...applicationState(), accounts: [
+      { ...base, id: "low", email: "low@example.test", quota_windows: [], quota_remaining: "12%" },
+      { ...base, id: "team", email: "team@example.test", plan_type: "Business" },
+      { ...base, id: "free", email: "free@example.test", plan_type: "Free" },
+      { ...base, id: "ready", email: "ready@example.test" },
+      applicationState().accounts[1]!,
+    ] };
+    const original = JSON.stringify(session.state);
+    const wrapper = mount(AccountsPanel);
+    const store = useAccountsStore();
+    expect(wrapper.findAll(".account-plan-group")).toHaveLength(0);
+    expect(wrapper.findAll(".account-grid")).toHaveLength(1);
+    expect(wrapper.find('input[type="search"]').exists()).toBe(false);
+    expect(wrapper.findAll(".account-email").map((email) => email.text()))
+      .toEqual(["free@example.test", "ready@example.test", "team@example.test", "low@example.test", "beta@example.test"]);
+    await wrapper.findAll(".account-plan-filters button")
+      .find((button) => button.text().includes("Team / Business"))!.trigger("click");
+    expect(store.plan).toBe("team");
+    expect(wrapper.findAll(".account-card")).toHaveLength(1);
+    expect(wrapper.findAll(".account-sync-details").some((details) => details.text().includes("Hết hạn Plus")))
+      .toBe(false);
+    store.filter = "quota-empty";
+    await flushPromises();
+    expect(wrapper.findAll(".account-card")).toHaveLength(0);
+    await wrapper.findAll("button").find((button) => button.text() === "Xóa bộ lọc")!.trigger("click");
+    expect(store.plan).toBe("all");
+    expect(wrapper.findAll(".account-card")).toHaveLength(5);
+    expect(JSON.stringify(session.state)).toBe(original);
+  });
+
   it("offers all seven account filters in a morphing popover", async () => {
     const wrapper = mount(AccountsPanel);
     await wrapper.get(".account-filter-trigger").trigger("click");
@@ -44,6 +77,8 @@ describe("AccountsPanel", () => {
     const wrapper = mount(AccountsPanel);
 
     expect(wrapper.get("#accounts-heading").text()).toBe("Tổng tài khoản: 2");
+    expect(wrapper.find(".account-list-summary").exists()).toBe(false);
+    expect(wrapper.get(".account-toolbar").isVisible()).toBe(false);
     expect(
       wrapper.get(".account-toolbar [data-action='account-status-details']")
         .text(),

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import { userFacingError } from "@/api/client.ts";
 import GlassButton from "@/components/glass/GlassButton.vue";
@@ -10,7 +10,7 @@ import { useAccountsStore, type AccountAction } from "@/stores/accounts.ts";
 import { useFeedbackStore } from "@/stores/feedback.ts";
 import { useSessionStore } from "@/stores/session.ts";
 import type { AccountState } from "@/types/api.ts";
-import type { AccountFilter } from "@/utils/accounts.ts";
+import type { AccountFilter, AccountSort } from "@/utils/accounts.ts";
 import AccountCard from "./AccountCard.vue";
 import AccountOverview from "./AccountOverview.vue";
 import ImportDialog from "./ImportDialog.vue";
@@ -47,6 +47,13 @@ const filters: Array<{ value: AccountFilter; label: string }> = [
   { value: "quota-empty", label: "Quota hết" },
   { value: "quota-unknown", label: "Chưa rõ quota" },
 ];
+const sorts = [
+  { value: "status", label: "Có thể dùng trước" },
+  { value: "email", label: "Email A–Z" },
+];
+const planOptions = computed(() => accounts.planGroups.filter((group) => (
+  ["plus", "team", "free"].includes(group.value) || group.total > 0 || accounts.plan === group.value
+)));
 
 function busyActions(accountId: string): AccountAction[] {
   return actionTypes.filter((action) => accounts.isBusy(accountId, action));
@@ -271,8 +278,25 @@ async function savePlusExpiration(): Promise<void> {
         </ImportDialog>
       </div>
     </div>
-    <div class="account-toolbar">
-      <AccountOverview />
+    <div class="account-plan-filters" role="group" aria-label="Lọc theo gói">
+      <GlassButton
+        variant="quiet"
+        :aria-pressed="accounts.plan === 'all'"
+        @click="accounts.plan = 'all'"
+      >
+        Tất cả gói <span class="account-plan-count">{{ accounts.accounts.length }}</span>
+      </GlassButton>
+      <GlassButton
+        v-for="option in planOptions"
+        :key="option.value"
+        variant="quiet"
+        :aria-pressed="accounts.plan === option.value"
+        @click="accounts.plan = option.value"
+      >
+        {{ option.label }} <span class="account-plan-count">{{ option.total }}</span>
+      </GlassButton>
+    </div>
+    <div v-show="false" class="account-toolbar">
       <GlassSelectPopover
         class="account-filter-control"
         trigger-class="account-filter-trigger"
@@ -282,8 +306,15 @@ async function savePlusExpiration(): Promise<void> {
         :options="filters"
         @update:model-value="setFilter"
       />
+      <GlassSelectPopover
+        label="Sắp xếp tài khoản"
+        morph-id="account-sort"
+        :model-value="accounts.sort"
+        :options="sorts"
+        @update:model-value="accounts.sort = $event as AccountSort"
+      />
+      <AccountOverview />
     </div>
-
     <div class="account-grid" data-content-layer="standard">
       <AccountCard
         v-for="account in accounts.filteredAccounts"
@@ -440,8 +471,11 @@ async function savePlusExpiration(): Promise<void> {
         </SurfaceActionButton>
       </template>
     </GlassDialog>
-    <p v-if="!accounts.filteredAccounts.length" class="empty">
-      Không có tài khoản phù hợp.
-    </p>
+    <div v-if="!accounts.filteredAccounts.length" class="empty">
+      <p>{{ accounts.accounts.length ? 'Không có tài khoản phù hợp.' : 'Chưa có tài khoản. Thêm tài khoản để bắt đầu.' }}</p>
+      <GlassButton v-if="accounts.accounts.length" variant="quiet" @click="accounts.clearFilters()">
+        Xóa bộ lọc
+      </GlassButton>
+    </div>
   </section>
 </template>

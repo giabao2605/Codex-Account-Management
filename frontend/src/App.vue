@@ -112,7 +112,6 @@ onBeforeUnmount(() => {
     <main class="shell">
       <header class="app-content-header">
         <h1>Tài khoản Codex</h1>
-        <p class="subtitle">Quản lý profile, quota và mức sử dụng token trên máy này.</p>
       </header>
 
       <div

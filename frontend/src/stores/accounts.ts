@@ -8,7 +8,12 @@ import type {
 } from "@/types/api.ts";
 import {
   accountMatchesFilter,
+  accountPlan,
+  accountPlans,
+  compareAccounts,
   type AccountFilter,
+  type AccountPlan,
+  type AccountSort,
 } from "@/utils/accounts.ts";
 import { useSessionStore } from "./session.ts";
 
@@ -24,14 +29,27 @@ export type AccountAction =
 export const useAccountsStore = defineStore("accounts", () => {
   const session = useSessionStore();
   const filter = ref<AccountFilter>("all");
+  const plan = ref<AccountPlan | "all">("all");
+  const sort = ref<AccountSort>("status");
   const busyKeys = ref<string[]>([]);
 
   const accounts = computed(() => session.state?.accounts ?? []);
   const filteredAccounts = computed(() => (
     accounts.value.filter((account) => (
       accountMatchesFilter(account, filter.value)
+      && (plan.value === "all" || accountPlan(account) === plan.value)
     ))
+      .sort((a, b) => compareAccounts(a, b, sort.value))
   ));
+  const planGroups = computed(() => accountPlans.map((group) => ({
+    ...group,
+    total: accounts.value.filter((account) => accountPlan(account) === group.value).length,
+  })));
+
+  function clearFilters(): void {
+    filter.value = "all";
+    plan.value = "all";
+  }
 
   function busyKey(accountId: string, action: AccountAction): string {
     return `${accountId}:${action}`;
@@ -147,9 +165,13 @@ export const useAccountsStore = defineStore("accounts", () => {
     accounts,
     addAccount,
     checkAccount,
+    clearFilters,
     deleteAccount,
     filter,
     filteredAccounts,
+    plan,
+    planGroups,
+    sort,
     isBusy,
     lifecycle,
     refresh,

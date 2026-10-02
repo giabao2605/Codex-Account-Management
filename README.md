@@ -8,6 +8,8 @@ tài khoản được mã hóa theo người dùng Windows hiện tại.
 
 - Hiển thị OTP theo thời gian chuẩn, tự cập nhật bộ đếm tại frontend.
 - Theo dõi quota, token, streak và heatmap sử dụng 12 tháng.
+- Lọc tài khoản theo gói và trạng thái trong một danh sách chung.
+  Ưu tiên tài khoản dùng được và quota còn nhiều ở tất cả cửa sổ.
 - Cô lập mỗi tài khoản trong một `CODEX_HOME` riêng.
 - Xếp hàng tài khoản nên dùng và hiển thị failover dạng chỉ đọc; không tự chuyển tài khoản.
 - Thêm, cập nhật mật khẩu, liên kết, ngắt liên kết và xóa tài khoản qua giao diện sáng/tối.

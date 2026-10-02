@@ -10,7 +10,7 @@ describe("AccountCard", () => {
     setActivePinia(createPinia());
   });
 
-  it("shows recommendation, plan, Plus expiration, OTP, quota, sync, reset, and last-sync state", () => {
+  it("shows account details while retaining the hidden Plus expiration", () => {
     const account = applicationState().accounts[0]!;
     const wrapper = mount(AccountCard, {
       props: {
@@ -25,6 +25,8 @@ describe("AccountCard", () => {
     expect(wrapper.text()).toContain("Plus");
     expect(wrapper.text()).toContain("Hết hạn Plus");
     expect(wrapper.text()).toContain("11/10/2026");
+    expect(wrapper.findAll(".account-sync-details > div")
+      .find((row) => row.text().includes("Hết hạn Plus"))!.isVisible()).toBe(false);
     expect(wrapper.text()).toContain("Đề xuất sử dụng");
     expect(wrapper.text()).toContain("Còn 20 giây");
     expect(wrapper.get(".otp-progress").attributes("value")).toBe("20");

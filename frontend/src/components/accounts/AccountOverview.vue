@@ -5,7 +5,7 @@ import GlassButton from "@/components/glass/GlassButton.vue";
 import GlassPopover from "@/components/glass/GlassPopover.vue";
 import SurfaceActionButton from "@/components/glass/SurfaceActionButton.vue";
 import { useSessionStore } from "@/stores/session.ts";
-import { syncMetrics } from "@/utils/accounts.ts";
+import { accountStatus, syncMetrics } from "@/utils/accounts.ts";
 
 const session = useSessionStore();
 const detailsOpen = ref(false);
@@ -31,15 +31,19 @@ const healthLabel = computed(() => {
     + metrics.value.unlinked
     + metrics.value.error
   );
+  const statuses = state.value?.accounts.map(accountStatus) ?? [];
   const usage = state.value?.usage_statistics;
+  if (!statuses.length) return "Chưa có tài khoản";
   if (syncIssues > 0) return `${syncIssues} tài khoản cần xử lý`;
-  if (usage?.exhausted_accounts) {
-    return `${usage.exhausted_accounts} tài khoản hết quota`;
+  const exhausted = Math.max(statuses.filter((status) => status === "empty").length, usage?.exhausted_accounts ?? 0);
+  const low = Math.max(statuses.filter((status) => status === "low").length, usage?.low_quota_accounts ?? 0);
+  if (exhausted) {
+    return `${exhausted} tài khoản hết quota`;
   }
-  if (usage?.low_quota_accounts) {
-    return `${usage.low_quota_accounts} tài khoản quota thấp`;
+  if (low) {
+    return `${low} tài khoản quota thấp`;
   }
-  if (usage?.quota_unknown_accounts || usage?.stale_quota_accounts) {
+  if (statuses.includes("unknown") || usage?.quota_unknown_accounts || usage?.stale_quota_accounts) {
     return "Dữ liệu quota cần cập nhật";
   }
   return "Tất cả hoạt động bình thường";

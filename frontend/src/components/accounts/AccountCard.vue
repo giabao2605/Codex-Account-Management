@@ -9,8 +9,10 @@ import { useSessionStore } from "@/stores/session.ts";
 import type { AccountState } from "@/types/api.ts";
 import {
   normalizedStatus,
+  accountPlan,
+  accountStatus,
+  accountStatuses,
   parseQuotaPercent,
-  statusTone,
 } from "@/utils/accounts.ts";
 
 const props = withDefaults(defineProps<{
@@ -51,6 +53,7 @@ const quotaWindows = computed(() => {
   }));
 });
 const quotaTone = computed(() => {
+  if (!["ready", "low", "empty"].includes(accountStatus(props.account))) return "unknown";
   const known = quotaWindows.value
     .map((window) => window.percent)
     .filter((percent): percent is number => percent !== null);
@@ -65,7 +68,13 @@ const otpRemaining = computed(() => {
   return remaining === null ? null : Math.max(0, Math.min(30, remaining));
 });
 const otpValue = computed(() => session.otpValue(props.account));
-const tone = computed(() => statusTone(props.account));
+const displayStatus = computed(() => {
+  const status = accountStatus(props.account);
+  const label = status === "unknown" && props.account.account_state === "Hoạt động bình thường"
+    ? "Chưa rõ quota" : accountStatuses[status].label;
+  return { ...accountStatuses[status], label };
+});
+const isPlus = computed(() => accountPlan(props.account) === "plus");
 const connectionStatus = computed(() => normalizedStatus(props.account));
 const isUnlinked = computed(() => (
   connectionStatus.value.includes("chưa liên kết")
@@ -149,15 +158,15 @@ function deleteAccount(): void {
         <h3 class="account-email" :title="account.email">{{ account.email }}</h3>
         <div class="account-badges">
           <span class="plan-badge">{{ account.plan_type }}</span>
-          <span v-if="recommended" class="recommendation-badge">Đề xuất sử dụng</span>
+          <span v-if="recommended && ['ready', 'low'].includes(accountStatus(account))" class="recommendation-badge">Đề xuất sử dụng</span>
         </div>
       </div>
       <span
         class="status"
-        :class="`is-${tone}`"
+        :class="`is-${displayStatus.tone}`"
         :title="account.account_state"
       >
-        {{ account.account_state }}
+        {{ displayStatus.label }}
       </span>
     </header>
 
@@ -225,6 +234,7 @@ function deleteAccount(): void {
     </div>
 
     <dl class="account-sync-details">
+      <div><dt>Tài khoản</dt><dd>{{ account.account_state }}</dd></div>
       <div><dt>Đồng bộ</dt><dd>{{ account.sync_status }}</dd></div>
       <div class="quota-reset-details">
         <dt>Đặt lại quota</dt>
@@ -237,7 +247,7 @@ function deleteAccount(): void {
           <strong>{{ window.quota_reset_at }}</strong>
         </dd>
       </div>
-      <div><dt>Hết hạn Plus</dt><dd>{{ plusExpirationLabel }}</dd></div>
+      <div v-if="isPlus" v-show="false"><dt>Hết hạn Plus</dt><dd>{{ plusExpirationLabel }}</dd></div>
       <div><dt>Lần đồng bộ cuối</dt><dd>{{ account.last_sync }}</dd></div>
     </dl>
 
@@ -340,6 +350,8 @@ function deleteAccount(): void {
             Chỉnh sửa mật khẩu
           </SurfaceActionButton>
           <SurfaceActionButton
+            v-if="isPlus"
+            v-show="false"
             role="menuitem"
             data-action="edit-plus-expiration"
             :busy="isBusy('plusExpiration')"

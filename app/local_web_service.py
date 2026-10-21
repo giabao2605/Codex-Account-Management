@@ -614,7 +614,7 @@ class LocalWebService:
                     moved = True
                 try:
                     self._save_accounts(new_accounts)
-                except OSError:
+                except Exception:
                     if moved:
                         os.replace(new_profile, old_profile)
                     raise

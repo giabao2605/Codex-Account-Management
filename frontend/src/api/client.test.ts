@@ -126,6 +126,7 @@ describe("LocalApiClient", () => {
     await client.checkAccount("alpha@example.test|password|secret");
     await client.addAccount("alpha@example.test|password|secret");
     await client.sensitiveValue("1111111111111111", "password");
+    await client.updateEmail("1111111111111111", "edited@example.test");
     await client.updatePassword("1111111111111111", "new-password");
     await client.updateSecret("1111111111111111", "KRUGS4ZANFZSAYJA");
     await client.updatePlusExpiration("1111111111111111", "2026-10-11");
@@ -144,6 +145,7 @@ describe("LocalApiClient", () => {
       "/api/accounts/import/check",
       "/api/accounts/import",
       "/api/accounts/1111111111111111/sensitive",
+      "/api/accounts/1111111111111111/email",
       "/api/accounts/1111111111111111/password",
       "/api/accounts/1111111111111111/secret",
       "/api/accounts/1111111111111111/plus-expiration",
@@ -153,6 +155,13 @@ describe("LocalApiClient", () => {
       "/api/accounts/1111111111111111",
       "/api/application/shutdown",
     ]);
+    const emailCall = fetchMock.mock.calls.find(
+      ([path]) => path === "/api/accounts/1111111111111111/email",
+    )!;
+    expect(emailCall[1]).toEqual(expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ email: "edited@example.test" }),
+    }));
     const passwordCall = fetchMock.mock.calls.find(
       ([path]) => path === "/api/accounts/1111111111111111/password",
     )!;

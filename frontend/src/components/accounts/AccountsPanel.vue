@@ -24,6 +24,14 @@ const importOpen = ref(false);
 const emailAccount = ref<AccountState | null>(null);
 const updatedEmail = ref("");
 const emailSaving = ref(false);
+const emailValid = computed(() => {
+  const email = updatedEmail.value.trim();
+  return (
+    email.length <= 254
+    && /^[^\\s@|]+@[^\\s@|]+\\.[^\\s@|]+$/.test(email)
+    && email !== emailAccount.value?.email
+  );
+});
 const passwordAccount = ref<AccountState | null>(null);
 const updatedPassword = ref("");
 const passwordSaving = ref(false);
@@ -161,7 +169,7 @@ async function saveEmail(): Promise<void> {
   const account = emailAccount.value;
   const email = updatedEmail.value.trim();
   if (
-    emailSaving.value || !account || !email || email === account.email
+    emailSaving.value || !account || !emailValid.value
     || accounts.isBusy(account.id, "email")
   ) return;
 
@@ -169,17 +177,13 @@ async function saveEmail(): Promise<void> {
   try {
     await accounts.updateEmail(account.id, email);
     feedback.success("Đã cập nhật email đã lưu. Nếu email Codex khác, hãy liên kết lại đúng tài khoản.");
-    closeEmailEditorAfterSave();
+    updatedEmail.value = "";
+    emailAccount.value = null;
   } catch (error) {
     feedback.error(userFacingError(error, "Không thể cập nhật email."));
   } finally {
     emailSaving.value = false;
   }
-}
-
-function closeEmailEditorAfterSave(): void {
-  updatedEmail.value = "";
-  emailAccount.value = null;
 }
 
 function openPasswordEditor(account: AccountState): void {
@@ -410,7 +414,7 @@ async function savePlusExpiration(): Promise<void> {
         <SurfaceActionButton
           data-action="save-email"
           :busy="emailSaving"
-          :disabled="!updatedEmail.trim() || updatedEmail.trim() === emailAccount.email"
+          :disabled="!emailValid || emailSaving"
           @click="saveEmail"
         >
           Lưu

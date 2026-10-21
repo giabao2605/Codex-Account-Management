@@ -12,7 +12,8 @@ tài khoản được mã hóa theo người dùng Windows hiện tại.
   Ưu tiên tài khoản dùng được và quota còn nhiều ở tất cả cửa sổ.
 - Cô lập mỗi tài khoản trong một `CODEX_HOME` riêng.
 - Xếp hàng tài khoản nên dùng và hiển thị failover dạng chỉ đọc; không tự chuyển tài khoản.
-- Thêm, cập nhật mật khẩu, liên kết, ngắt liên kết và xóa tài khoản qua giao diện sáng/tối.
+- Thêm, đổi email đã lưu, cập nhật mật khẩu, liên kết, ngắt liên kết và xóa tài khoản qua giao diện sáng/tối.
+- Đổi email chỉ thay thông tin trong ứng dụng, không thay email đăng nhập OpenAI. Profile Codex được chuyển sang đường dẫn mới; nếu danh tính Codex không khớp thì cần liên kết lại.
 - Ngắt liên kết chỉ gỡ phiên đăng nhập Codex; giữ tài khoản, OTP, lịch sử và cấu hình để liên kết lại. Xóa tài khoản là thao tác riêng.
 
 ## Yêu cầu

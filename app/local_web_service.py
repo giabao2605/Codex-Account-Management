@@ -567,6 +567,78 @@ class LocalWebService:
 
         raise ValueError("Trường dữ liệu không hợp lệ.")
 
+    def update_email(self, account_id: str, email: str) -> dict[str, object]:
+        normalized_email = email.strip()
+        if (
+            len(normalized_email) > 254
+            or not re.fullmatch(
+                r"[^\\s@|]+@[^\\s@|]+\\.[^\\s@|]+",
+                normalized_email,
+            )
+        ):
+            raise ValueError("Email không hợp lệ.")
+
+        with self._account_write_lock:
+            with self._lock:
+                account = self._find_account_locked(account_id)
+                old_key = account.email.casefold()
+                new_key = normalized_email.casefold()
+                if any(
+                    item is not account and item.email.casefold() == new_key
+                    for item in self._accounts
+                ):
+                    raise AccountConflictError("email")
+                new_accounts = tuple(
+                    replace(item, email=normalized_email)
+                    if item is account else item
+                    for item in self._accounts
+                )
+
+            old_profile = self.profile_directory(account.email)
+            new_profile = self.profile_directory(normalized_email)
+            with self._profile_lock_for(old_key):
+                validate_direct_profile_directory(self.profiles_dir, old_profile)
+                validate_direct_profile_directory(self.profiles_dir, new_profile)
+                if old_profile != new_profile and new_profile.exists():
+                    raise UnsafeProfilePathError(
+                        "Thư mục profile của email mới đã tồn tại."
+                    )
+                if not self._stop_login_process(old_key):
+                    raise OSError("Không thể dừng đăng nhập Codex.")
+                if not self._close_session(old_key):
+                    raise OSError("Không thể dừng Codex App Server.")
+
+                moved = False
+                if old_profile != new_profile and old_profile.exists():
+                    os.replace(old_profile, new_profile)
+                    moved = True
+                try:
+                    self._save_accounts(new_accounts)
+                except OSError:
+                    if moved:
+                        os.replace(new_profile, old_profile)
+                    raise
+
+                with self._lock:
+                    if old_key != new_key:
+                        old_info = self._codex_info.pop(old_key, None)
+                        if old_info is not None:
+                            self._codex_info[new_key] = replace(
+                                old_info, stored_email=normalized_email
+                            )
+                        old_cache = self._token_usage_cache.pop(old_key, None)
+                        if old_cache is not None:
+                            self._token_usage_cache[new_key] = old_cache
+                        if old_key in self._relogin_required:
+                            self._relogin_required.discard(old_key)
+                            self._relogin_required.add(new_key)
+                    self._accounts = new_accounts
+                    self._sync_codex_info_locked()
+
+        new_id = self.account_id(normalized_email)
+        self.refresh_async({new_id})
+        return {"updated": True, "id": new_id, "email": normalized_email}
+
     def update_password(self, account_id: str, password: str) -> bool:
         if not password.strip():
             raise ValueError("Mật khẩu không được để trống.")

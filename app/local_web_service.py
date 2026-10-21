@@ -1348,6 +1348,9 @@ class LocalWebService:
         auth_file = profile_dir / "auth.json"
 
         with self._lock:
+            # A queued refresh may still carry the pre-rename account snapshot.
+            if not any(item is account for item in self._accounts):
+                return "unlinked"
             if key in self._relogin_required:
                 return "relogin"
 

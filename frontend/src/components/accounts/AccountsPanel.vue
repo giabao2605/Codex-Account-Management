@@ -405,7 +405,7 @@ async function savePlusExpiration(): Promise<void> {
       >
       <p id="email-update-note">
         Chỉ đổi email đã lưu trong ứng dụng, không đổi email đăng nhập OpenAI.
-        Profile Codex sẽ được chuyển theo; nếu email đăng nhập Codex khác, cần liên kết lại.
+        Profile và lịch sử Codex được giữ nguyên; nếu email đăng nhập Codex khác, cần liên kết lại.
       </p>
       <template #actions>
         <SurfaceActionButton :disabled="emailSaving" @click="closeEmailEditor">

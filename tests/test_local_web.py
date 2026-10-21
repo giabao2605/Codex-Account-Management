@@ -1652,7 +1652,38 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("secret-and-token-value", response.text)
 
-    def test_update_email_moves_profile_and_keeps_saved_credentials(self) -> None:
+    @unittest.skipUnless(os.name == "nt", "Windows directory sharing semantics")
+    def test_update_email_with_real_windows_directory_lock(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
+        account_id = self.service.account_id("old@example.com")
+        profile = self.service.profile_directory("old@example.com")
+        profile.mkdir()
+        create_file = ctypes.windll.kernel32.CreateFileW
+        create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                wintypes.HANDLE]
+        create_file.restype = wintypes.HANDLE
+        close_handle = ctypes.windll.kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        (profile / "history.jsonl").write_text("preserve", encoding="utf-8")
+        handle = create_file(str(profile / "history.jsonl"), 0x80000000, 3, None, 3, 0, None)
+        self.assertNotEqual(handle, wintypes.HANDLE(-1).value)
+        try:
+            response = self.client.patch(
+                f"/api/accounts/{account_id}/email", headers=self.headers,
+                json={"email": "new@example.com"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["id"], account_id)
+            self.assertEqual(self.service.profile_directory("new@example.com"), profile)
+        finally:
+            close_handle(handle)
+
+    def test_update_email_keeps_profile_identity_and_saved_credentials(self) -> None:
         self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
         old_id = self.service.account_id("old@example.com")
         old_profile = self.service.profile_directory("old@example.com")
@@ -1674,10 +1705,11 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {
             "updated": True, "id": new_id, "email": "new@example.com",
         })
-        self.assertNotEqual(new_id, old_id)
-        self.assertFalse(old_profile.exists())
-        self.assertEqual((new_profile / "auth.json").read_text(encoding="utf-8"), "test-auth")
-        self.assertEqual((new_profile / "history.txt").read_text(encoding="utf-8"), "history")
+        self.assertEqual(new_id, old_id)
+        self.assertEqual(self.service.profile_directory("new@example.com"), old_profile)
+        self.assertFalse(new_profile.exists())
+        self.assertEqual((old_profile / "auth.json").read_text(encoding="utf-8"), "test-auth")
+        self.assertEqual((old_profile / "history.txt").read_text(encoding="utf-8"), "history")
         session.close.assert_called_once()
         self.assertEqual(
             self.service.sensitive_value(new_id, "password"), "password"
@@ -1692,9 +1724,9 @@ class LocalWebApiTests(unittest.TestCase):
             self.client.patch(
                 f"/api/accounts/{old_id}/password",
                 headers=self.headers,
-                json={"password": "should-fail"},
+                json={"password": "updated-password"},
             ).status_code,
-            404,
+            200,
         )
 
     def test_update_email_validates_duplicates_and_csrf(self) -> None:
@@ -1744,7 +1776,7 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
         self.assertEqual(self.client.get("/api/state").json()["accounts"][0]["email"], "old@example.com")
 
-    def test_update_email_reports_windows_profile_lock(self) -> None:
+    def test_update_email_reports_account_file_permission_error(self) -> None:
         self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
         profile = self.service.profile_directory("old@example.com")
         profile.mkdir()
@@ -1758,12 +1790,13 @@ class LocalWebApiTests(unittest.TestCase):
                 json={"email": "new@example.com"},
             )
         self.assertEqual(response.status_code, 409)
-        self.assertIn("Windows đang khóa", response.json()["detail"])
-        self.assertEqual(wait.call_count, 3)
+        self.assertIn("Không thể ghi dữ liệu tài khoản", response.json()["detail"])
+        self.assertNotIn("Windows đang khóa", response.json()["detail"])
+        wait.assert_not_called()
         self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
         self.assertTrue(profile.exists())
 
-    def test_update_email_reports_unrelated_existing_profile_directory(self) -> None:
+    def test_update_email_ignores_unrelated_existing_profile_directory(self) -> None:
         self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
         destination = self.service.profile_directory("unused@example.com")
         destination.mkdir()
@@ -1772,9 +1805,9 @@ class LocalWebApiTests(unittest.TestCase):
             headers=self.headers,
             json={"email": "unused@example.com"},
         )
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("đã tồn tại", response.json()["detail"])
-        self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(destination.is_dir())
+        self.assertEqual(self.service._load_accounts()[0].email, "unused@example.com")
 
     def test_update_email_does_not_overwrite_existing_profile(self) -> None:
         self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
@@ -1788,10 +1821,11 @@ class LocalWebApiTests(unittest.TestCase):
             headers=self.headers,
             json={"email": "new@example.com"},
         )
-        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(old_profile.exists())
+        self.assertEqual(self.service.profile_directory("new@example.com"), old_profile)
         self.assertEqual((new_profile / "auth.json").read_text(encoding="utf-8"), "keep-new")
-        self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
+        self.assertEqual(self.service._load_accounts()[0].email, "new@example.com")
 
     def test_update_email_changes_only_case_without_moving_profile(self) -> None:
         self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")

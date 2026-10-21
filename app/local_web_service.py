@@ -41,6 +41,10 @@ from .local_web_profiles import (
 )
 from .otp_codex_manager_with_account_status import (
     Account,
+    AccountIdentityError,
+    account_identity,
+    load_account_identity,
+    validate_account_identities,
     CodexInfo,
     build_codex_command,
     build_codex_environment,
@@ -72,7 +76,7 @@ class AccountNotFoundError(LookupError):
 
 
 class AccountEmailUpdateError(OSError):
-    """A safe, actionable email/profile migration error for the local UI."""
+    """A safe, actionable email update error for the local UI."""
 
 
 _ATTENTION_TERMS = (
@@ -334,7 +338,7 @@ class LocalWebService:
             )
             rows.append(
                 {
-                    "id": self.account_id(account.email),
+                    "id": account.account_id or account_identity(account.email)[0],
                     "email": account.email,
                     "otp": None if now is None else account.totp.at(now),
                     "otp_remaining_seconds": remaining_seconds,
@@ -405,7 +409,7 @@ class LocalWebService:
         with self._lock:
             accounts = [
                 {
-                    "account_id": self.account_id(account.email),
+                    "account_id": account.account_id or account_identity(account.email)[0],
                     "email": account.email,
                 }
                 for account in self._accounts
@@ -455,13 +459,18 @@ class LocalWebService:
                 current_accounts,
                 raw_text,
             )
+            profile_dir = self.profiles_dir / candidate.profile_name
+            if self.profiles_dir.exists() or self.profiles_dir.is_symlink():
+                validate_direct_profile_directory(self.profiles_dir, profile_dir)
+            if profile_dir.exists():
+                raise UnsafeProfilePathError("Thư mục profile mới đã tồn tại.")
             self._save_accounts(new_accounts)
 
             with self._lock:
                 self._accounts = new_accounts
                 self._sync_codex_info_locked()
 
-        self.refresh_async({self.account_id(candidate.email)})
+        self.refresh_async({candidate.account_id})
         return {
             "total": len(new_accounts),
             "email": candidate.email,
@@ -571,31 +580,6 @@ class LocalWebService:
 
         raise ValueError("Trường dữ liệu không hợp lệ.")
 
-    @staticmethod
-    def _move_email_profile(source: Path, destination: Path) -> None:
-        """Retry transient Windows sharing violations without overwriting profiles."""
-        for attempt in range(4):
-            if destination.exists():
-                raise UnsafeProfilePathError(
-                    "Thư mục profile đích đã tồn tại. Không thể tự động ghi đè."
-                )
-            try:
-                os.replace(source, destination)
-                return
-            except PermissionError as error:
-                if attempt == 3:
-                    raise AccountEmailUpdateError(
-                        "Windows đang khóa thư mục profile Codex. "
-                        "Hãy đóng các cửa sổ Codex CLI đang sử dụng tài khoản "
-                        "và thử lại."
-                    ) from error
-                time.sleep(0.2 * (attempt + 1))
-            except OSError as error:
-                raise AccountEmailUpdateError(
-                    "Không thể di chuyển thư mục profile Codex. "
-                    "Hãy kiểm tra quyền truy cập thư mục."
-                ) from error
-
     def update_email(self, account_id: str, email: str) -> dict[str, object]:
         normalized_email = email.strip()
         if (
@@ -618,20 +602,16 @@ class LocalWebService:
                 ):
                     raise AccountConflictError("email")
                 new_accounts = tuple(
-                    replace(item, email=normalized_email)
+                    replace(
+                        item, email=normalized_email,
+                        account_id=self.account_id(account.email),
+                        profile_name=self.profile_directory(account.email).name,
+                    )
                     if item is account else item
                     for item in self._accounts
                 )
 
-            old_profile = self.profile_directory(account.email)
-            new_profile = self.profile_directory(normalized_email)
             with self._profile_lock_for(old_key):
-                validate_direct_profile_directory(self.profiles_dir, old_profile)
-                validate_direct_profile_directory(self.profiles_dir, new_profile)
-                if old_profile != new_profile and new_profile.exists():
-                    raise UnsafeProfilePathError(
-                        "Thư mục profile của email mới đã tồn tại."
-                    )
                 if not self._stop_login_process(old_key):
                     raise AccountEmailUpdateError(
                         "Không thể dừng tiến trình đăng nhập Codex đang chạy."
@@ -640,28 +620,13 @@ class LocalWebService:
                     raise AccountEmailUpdateError(
                         "Không thể dừng Codex App Server đang sử dụng profile."
                     )
-
-                moved = False
-                if old_profile != new_profile and old_profile.exists():
-                    self._move_email_profile(old_profile, new_profile)
-                    moved = True
                 try:
                     self._save_accounts(new_accounts)
-                except Exception as error:
-                    if moved:
-                        try:
-                            self._move_email_profile(new_profile, old_profile)
-                        except (OSError, UnsafeProfilePathError) as rollback_error:
-                            raise AccountEmailUpdateError(
-                                "Không thể lưu email và khôi phục profile. "
-                                "Hãy dừng ứng dụng và kiểm tra dữ liệu trước khi thử lại."
-                            ) from rollback_error
-                    if isinstance(error, OSError):
-                        raise AccountEmailUpdateError(
-                            "Không thể ghi dữ liệu tài khoản. "
-                            "Hãy kiểm tra quyền ghi file accounts.json."
-                        ) from error
-                    raise
+                except OSError as error:
+                    raise AccountEmailUpdateError(
+                        "Không thể ghi dữ liệu tài khoản. "
+                        "Hãy kiểm tra quyền ghi file accounts.json và dung lượng ổ đĩa."
+                    ) from error
 
                 with self._lock:
                     if old_key != new_key:
@@ -678,8 +643,21 @@ class LocalWebService:
                             self._relogin_required.add(new_key)
                     self._accounts = new_accounts
                     self._sync_codex_info_locked()
+                    info = self._codex_info[new_key]
+                    if (info.codex_email != "—"
+                            and info.codex_email.casefold() != new_key):
+                        self._apply_codex_result(new_key, {
+                            "account": {"account": {"email": info.codex_email}},
+                        })
+                    elif (info.codex_email.casefold() == new_key
+                            and info.account_state == "Sai tài khoản Codex"):
+                        self._relogin_required.discard(new_key)
+                        self._codex_info[new_key] = replace(
+                            info, account_state="Chưa xác định",
+                            status="Đang chờ đồng bộ...",
+                        )
 
-        new_id = self.account_id(normalized_email)
+        new_id = account_id
         self.refresh_async({new_id})
         return {"updated": True, "id": new_id, "email": normalized_email}
 
@@ -791,11 +769,12 @@ class LocalWebService:
         return True
 
     def login(self, account_id: str) -> None:
-        with self._lock:
-            account = self._find_account_locked(account_id)
-            key = account.email.casefold()
-        with self._profile_lock_for(key):
-            self._login_locked(account_id)
+        with self._account_write_lock:
+            with self._lock:
+                account = self._find_account_locked(account_id)
+                key = account.email.casefold()
+            with self._profile_lock_for(key):
+                self._login_locked(account_id)
 
     def _login_locked(self, account_id: str) -> None:
         if not self.enable_codex:
@@ -891,14 +870,20 @@ class LocalWebService:
             daemon=True,
         ).start()
 
-    @staticmethod
-    def account_id(email: str) -> str:
-        return hashlib.sha256(
-            email.casefold().encode("utf-8")
-        ).hexdigest()[:16]
+    def account_id(self, email: str) -> str:
+        with self._lock:
+            account = next((item for item in self._accounts
+                            if item.email.casefold() == email.casefold()), None)
+            if account is not None and account.account_id:
+                return account.account_id
+        return hashlib.sha256(email.casefold().encode("utf-8")).hexdigest()[:16]
 
     def profile_directory(self, email: str) -> Path:
-        return self.profiles_dir / profile_directory_for(email).name
+        with self._lock:
+            account = next((item for item in self._accounts
+                            if item.email.casefold() == email.casefold()), None)
+            name = account.profile_name if account is not None else ""
+        return self.profiles_dir / (name or profile_directory_for(email).name)
 
     @staticmethod
     def _recommend_account(rows: list[dict[str, object]]) -> dict | None:
@@ -1226,8 +1211,11 @@ class LocalWebService:
                 ):
                     continue
 
+                identifier, profile_name = load_account_identity(item, email)
                 accounts.append(
                     Account(
+                        account_id=identifier,
+                        profile_name=profile_name,
                         email=email,
                         password=password,
                         secret=secret,
@@ -1237,19 +1225,27 @@ class LocalWebService:
                 )
                 seen_emails.add(email_key)
                 seen_secrets.add(secret)
+            except AccountIdentityError:
+                raise
             except Exception:
                 continue
 
+        validate_account_identities(accounts)
         return tuple(accounts)
 
     def _save_accounts(
         self,
         accounts: tuple[Account, ...],
     ) -> None:
+        validate_account_identities(accounts)
         output = {
             "version": 1,
             "accounts": [
                 {
+                    "account_id": account.account_id or account_identity(account.email)[0],
+                    "profile_name": encrypt_text(
+                        account.profile_name or account_identity(account.email)[1]
+                    ),
                     "email": encrypt_text(account.email),
                     "password": encrypt_text(account.password),
                     "secret": encrypt_text(account.secret),
@@ -1555,24 +1551,10 @@ class LocalWebService:
             event_type: str,
             payload: dict,
         ) -> None:
-            if event_type == "rate_limits_updated":
-                self._apply_codex_result(key, payload)
-            elif event_type == "relogin_required":
-                self._mark_relogin(key)
-            elif event_type == "account_updated":
-                with self._lock:
-                    self._relogin_required.discard(key)
-            elif event_type == "server_stopped":
-                with self._lock:
-                    current = self._codex_info.get(key)
-
-                    if current is not None:
-                        self._codex_info[key] = replace(
-                            current,
-                            status=(
-                                "App-server đã dừng, sẽ tự kết nối lại"
-                            ),
-                        )
+            with self._lock:
+                if self._sessions.get(key) is not session:
+                    return
+                self._handle_session_notification(key, event_type, payload)
 
         session = CodexProfileSession(
             profile_dir=profile_dir,
@@ -1592,6 +1574,26 @@ class LocalWebService:
 
         session.close()
         return concurrent
+
+    def _handle_session_notification(self, key: str, event_type: str, payload: dict) -> None:
+        if event_type == "rate_limits_updated":
+            self._apply_codex_result(key, payload)
+        elif event_type == "relogin_required":
+            self._mark_relogin(key)
+        elif event_type == "account_updated":
+            with self._lock:
+                self._relogin_required.discard(key)
+        elif event_type == "server_stopped":
+            with self._lock:
+                current = self._codex_info.get(key)
+
+                if current is not None:
+                    self._codex_info[key] = replace(
+                        current,
+                        status=(
+                            "App-server đã dừng, sẽ tự kết nối lại"
+                        ),
+                    )
 
     def _close_session(self, key: str) -> bool:
         with self._lock:

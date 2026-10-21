@@ -745,7 +745,7 @@ def create_app(
         except OSError as error:
             raise HTTPException(
                 status_code=409,
-                detail="Không thể ghi hoặc di chuyển dữ liệu tài khoản.",
+                detail="Không thể ghi dữ liệu tài khoản.",
             ) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

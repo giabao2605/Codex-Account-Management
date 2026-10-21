@@ -6,6 +6,7 @@ from .otp_codex_manager_with_account_status import (
     Account,
     create_totp,
     parse_account_line,
+    new_account_identity,
 )
 
 
@@ -31,7 +32,10 @@ def parse_new_account(raw_text: str) -> Account:
         raise ValueError("Mỗi lần chỉ được thêm một tài khoản.")
 
     email, password, secret = parse_account_line(lines[0])
+    identifier, profile_name = new_account_identity()
     return Account(
+        account_id=identifier,
+        profile_name=profile_name,
         email=email,
         password=password,
         secret=secret,

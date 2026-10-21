@@ -122,6 +122,7 @@ export const useAccountsStore = defineStore("accounts", () => {
   async function updateEmail(accountId: string, email: string): Promise<void> {
     await withBusy(accountId, "email", async () => {
       await session.getClient().updateEmail(accountId, email);
+      clearFilters();
       await session.pollState(true);
     });
   }

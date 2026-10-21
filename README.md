@@ -13,6 +13,7 @@ tài khoản được mã hóa theo người dùng Windows hiện tại.
 - Cô lập mỗi tài khoản trong một `CODEX_HOME` riêng.
 - Xếp hàng tài khoản nên dùng và hiển thị failover dạng chỉ đọc; không tự chuyển tài khoản.
 - Thêm, cập nhật mật khẩu, liên kết, ngắt liên kết và xóa tài khoản qua giao diện sáng/tối.
+- Ngắt liên kết chỉ gỡ phiên đăng nhập Codex; giữ tài khoản, OTP, lịch sử và cấu hình để liên kết lại. Xóa tài khoản là thao tác riêng.
 
 ## Yêu cầu
 

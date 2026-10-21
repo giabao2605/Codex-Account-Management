@@ -105,6 +105,7 @@ export const useAccountsStore = defineStore("accounts", () => {
         await client.login(accountId);
       } else {
         await client.unlink(accountId);
+        clearFilters();
       }
       await session.pollState();
     });

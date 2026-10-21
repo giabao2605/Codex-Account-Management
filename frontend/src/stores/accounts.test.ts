@@ -94,6 +94,50 @@ describe("accounts store", () => {
     );
   });
 
+  it("keeps an unlinked account visible for relinking by clearing active filters", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const original = session.state.accounts[0]!;
+    const unlink = vi.fn().mockResolvedValue({ accepted: true });
+    vi.spyOn(session, "getClient").mockReturnValue({ unlink } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockImplementation(async () => {
+      session.state = { ...applicationState(), accounts: [
+        { ...original, plan_type: "—", quota_remaining: "—", quota_windows: [], sync_status: "Chưa liên kết" },
+      ] };
+    });
+    const store = useAccountsStore();
+    store.plan = "plus";
+    store.filter = "quota-available";
+
+    await store.lifecycle(original.id, "unlink");
+
+    expect(unlink).toHaveBeenCalledWith(original.id);
+    expect(store.plan).toBe("all");
+    expect(store.filter).toBe("all");
+    expect(store.filteredAccounts.map((account) => account.id)).toContain(original.id);
+    expect(store.accountById(original.id)?.sync_status).toBe("Chưa liên kết");
+  });
+
+  it("preserves filters when unlink fails or login succeeds", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const unlink = vi.fn().mockRejectedValue(new Error("auth file locked"));
+    const login = vi.fn().mockResolvedValue({ accepted: true });
+    vi.spyOn(session, "getClient").mockReturnValue({ unlink, login } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+    const store = useAccountsStore();
+    store.plan = "plus";
+    store.filter = "quota-available";
+
+    await expect(store.lifecycle("1111111111111111", "unlink")).rejects.toThrow("auth file locked");
+    expect(store.plan).toBe("plus");
+    expect(store.filter).toBe("quota-available");
+    expect(session.pollState).not.toHaveBeenCalled();
+    await store.lifecycle("1111111111111111", "login");
+    expect(store.plan).toBe("plus");
+    expect(store.filter).toBe("quota-available");
+  });
+
   it("updates the Plus expiration through the typed client and refreshes state", async () => {
     const session = useSessionStore();
     session.state = applicationState();

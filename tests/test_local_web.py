@@ -789,19 +789,25 @@ class LocalWebApiTests(unittest.TestCase):
         finally:
             shutdown_client.close()
 
-    def test_unlink_permanently_deletes_profile_without_reading_auth(
-        self,
-    ) -> None:
-        self.service.import_accounts(
-            "user@example.com|password|JBSWY3DPEHPK3PXP"
-        )
+    def test_unlink_preserves_account_and_profile_without_reading_auth(self) -> None:
+        self.service.import_accounts("user@example.com|password|JBSWY3DPEHPK3PXP")
         account_id = self.service.account_id("user@example.com")
+        self.service.update_plus_expiration(account_id, "2026-10-11")
         profile_dir = self.service.profile_directory("user@example.com")
         profile_dir.mkdir(parents=True)
-        (profile_dir / "auth.json").write_text(
-            "unlink-auth-content",
-            encoding="utf-8",
-        )
+        files = {
+            "history.jsonl": b'{"conversation":"keep"}\n',
+            "config.toml": b'model = "test-model"\ncli_auth_credentials_store = "file"\n',
+            "sessions/session.jsonl": b'{"session":"keep"}\n',
+            "state_5.sqlite": b"saved-state",
+        }
+        for relative_path, content in files.items():
+            target = profile_dir / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        auth_file = profile_dir / "auth.json"
+        auth_file.write_text("unlink-auth-content", encoding="utf-8")
+        accounts_before = self.service.data_file.read_bytes()
         original_open = Path.open
 
         def reject_auth_reads(path: Path, mode="r", *args, **kwargs):
@@ -810,65 +816,113 @@ class LocalWebApiTests(unittest.TestCase):
             return original_open(path, mode, *args, **kwargs)
 
         with patch.object(Path, "open", reject_auth_reads):
-            unlink = self.client.post(
-                f"/api/codex/{account_id}/unlink",
-                headers=self.headers,
+            response = self.client.post(
+                f"/api/codex/{account_id}/unlink", headers=self.headers,
             )
-        self.assertEqual(unlink.status_code, 200, unlink.text)
-        self.assertFalse(profile_dir.exists())
-        self.assertFalse((self.service.profiles_dir / ".archived").exists())
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(auth_file.exists())
+        self.assertTrue(profile_dir.is_dir())
+        for relative_path, content in files.items():
+            self.assertEqual((profile_dir / relative_path).read_bytes(), content)
+        self.assertEqual(self.service.data_file.read_bytes(), accounts_before)
+        self.assertEqual(self.service.sensitive_value(account_id, "password"), "password")
+        self.assertEqual(self.service.sensitive_value(account_id, "secret"), "JBSWY3DPEHPK3PXP")
         state = self.service.state()
         self.assertEqual(len(state["accounts"]), 1)
-        self.assertEqual(
-            state["accounts"][0]["sync_status"],
-            "Chưa liên kết",
-        )
+        self.assertEqual(state["accounts"][0]["sync_status"], "Chưa liên kết")
+        self.assertEqual(state["accounts"][0]["plus_expires_at"], "2026-10-11")
+        with self.service._lock:
+            account = self.service._find_account_locked(account_id)
+        with patch.object(self.service, "_get_session") as get_session:
+            self.assertEqual(self.service._refresh_account(account), "unlinked")
+        get_session.assert_not_called()
+        self.assertEqual(self.service.state()["accounts"][0]["sync_status"], "Chưa liên kết")
+        self.assertFalse(auth_file.exists())
 
-    def test_unlink_does_not_reactivate_profile_when_cleanup_fails(
-        self,
-    ) -> None:
-        self.service.import_accounts(
-            "user@example.com|password|JBSWY3DPEHPK3PXP"
-        )
+        # Re-login targets the retained directory; no real Codex process is launched.
+        process = Mock()
+        process.poll.return_value = 0
+        self.service.enable_codex = True
+        with (
+            patch("app.local_web_service.build_codex_command", return_value=["codex", "login"]),
+            patch("app.local_web_service.subprocess.Popen", return_value=process) as popen,
+            patch("app.local_web_service.threading.Thread"),
+        ):
+            self.service.login(account_id)
+        self.assertEqual(popen.call_args.kwargs["env"]["CODEX_HOME"], str(profile_dir))
+        for relative_path, content in files.items():
+            self.assertEqual((profile_dir / relative_path).read_bytes(), content)
+        self.assertEqual(self.service.data_file.read_bytes(), accounts_before)
+
+    def test_unlink_auth_failure_preserves_state_and_retry_succeeds(self) -> None:
+        self.service.import_accounts("user@example.com|password|JBSWY3DPEHPK3PXP")
         account_id = self.service.account_id("user@example.com")
         profile_dir = self.service.profile_directory("user@example.com")
         profile_dir.mkdir()
+        auth_file = profile_dir / "auth.json"
+        auth_file.write_bytes(b"saved-auth")
+        history = profile_dir / "history.jsonl"
+        history.write_bytes(b"saved-history")
+        accounts_before = self.service.data_file.read_bytes()
         with self.service._lock:
             self.service._codex_info["user@example.com"] = CodexInfo(
-                stored_email="user@example.com",
-                status="Đã đồng bộ",
+                stored_email="user@example.com", status="Đã đồng bộ",
             )
+        original_unlink = Path.unlink
 
-        with patch(
-            "app.local_web_service.delete_profile_directory",
-            side_effect=OSError("locked staged file"),
-        ):
+        def reject_auth_unlink(path: Path, *args, **kwargs):
+            if path == auth_file:
+                raise OSError("auth file locked")
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", reject_auth_unlink):
             response = self.client.post(
-                f"/api/codex/{account_id}/unlink",
-                headers=self.headers,
+                f"/api/codex/{account_id}/unlink", headers=self.headers,
             )
-
-        self.assertEqual(response.status_code, 409)
-        self.assertFalse(profile_dir.exists())
-        self.assertEqual(
-            self.service.state()["accounts"][0]["sync_status"],
-            "Chưa liên kết",
-        )
-
-        retry = self.client.post(
-            f"/api/codex/{account_id}/unlink",
-            headers=self.headers,
-        )
-
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(auth_file.read_bytes(), b"saved-auth")
+        self.assertEqual(history.read_bytes(), b"saved-history")
+        self.assertEqual(self.service.data_file.read_bytes(), accounts_before)
+        self.assertEqual(self.service.state()["accounts"][0]["sync_status"], "Đã đồng bộ")
+        retry = self.client.post(f"/api/codex/{account_id}/unlink", headers=self.headers)
         self.assertEqual(retry.status_code, 200, retry.text)
-        self.assertEqual(
-            list(
-                self.service.profiles_dir.glob(
-                    f".{profile_dir.name}.deleting-*"
-                )
-            ),
-            [],
-        )
+        self.assertFalse(auth_file.exists())
+        self.assertEqual(history.read_bytes(), b"saved-history")
+        self.assertEqual(self.service.data_file.read_bytes(), accounts_before)
+        self.assertEqual(self.service.state()["accounts"][0]["sync_status"], "Chưa liên kết")
+
+    def test_unlink_missing_auth_is_idempotent_and_preserves_history(self) -> None:
+        self.service.import_accounts("user@example.com|password|JBSWY3DPEHPK3PXP")
+        account_id = self.service.account_id("user@example.com")
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        history = profile_dir / "history.jsonl"
+        history.write_bytes(b"saved-history")
+        for _ in range(2):
+            response = self.client.post(f"/api/codex/{account_id}/unlink", headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(history.read_bytes(), b"saved-history")
+
+    def test_unlink_rejects_symlink_profile_or_root(self) -> None:
+        self.service.import_accounts("user@example.com|password|JBSWY3DPEHPK3PXP")
+        account_id = self.service.account_id("user@example.com")
+        profile_dir = self.service.profile_directory("user@example.com")
+        profile_dir.mkdir()
+        auth_file = profile_dir / "auth.json"
+        auth_file.write_bytes(b"saved-auth")
+        history = profile_dir / "history.jsonl"
+        history.write_bytes(b"saved-history")
+        accounts_before = self.service.data_file.read_bytes()
+        for unsafe_path in (profile_dir, self.service.profiles_dir):
+            with self.subTest(unsafe_path=unsafe_path):
+                with patch.object(Path, "is_symlink", lambda path: path == unsafe_path):
+                    response = self.client.post(
+                        f"/api/codex/{account_id}/unlink", headers=self.headers,
+                    )
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(auth_file.read_bytes(), b"saved-auth")
+                self.assertEqual(history.read_bytes(), b"saved-history")
+                self.assertEqual(self.service.data_file.read_bytes(), accounts_before)
 
     def test_unlink_fails_closed_when_login_process_survives(self) -> None:
         self.service.import_accounts(

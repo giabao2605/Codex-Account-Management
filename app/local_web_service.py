@@ -36,6 +36,7 @@ from .local_web_profiles import (
     delete_staged_profile_directories,
     restore_staged_profile_directory,
     stage_profile_directory_for_deletion,
+    validate_direct_profile_directory,
     validate_profiles_root,
 )
 from .otp_codex_manager_with_account_status import (
@@ -526,14 +527,8 @@ class LocalWebService:
                     raise OSError("Không thể dừng đăng nhập Codex.")
                 if not self._close_session(key):
                     raise OSError("Không thể dừng Codex App Server.")
-                delete_staged_profile_directories(
-                    self.profiles_dir,
-                    profile_dir,
-                )
-                staged_profile_dir = stage_profile_directory_for_deletion(
-                    self.profiles_dir,
-                    profile_dir,
-                )
+                validate_direct_profile_directory(self.profiles_dir, profile_dir)
+                (profile_dir / "auth.json").unlink(missing_ok=True)
                 with self._lock:
                     self._token_usage_cache.pop(key, None)
                     self._relogin_required.discard(key)
@@ -554,11 +549,6 @@ class LocalWebService:
                             status="Chưa liên kết",
                             last_sync="—",
                         )
-                if staged_profile_dir is not None:
-                    delete_profile_directory(
-                        self.profiles_dir,
-                        staged_profile_dir,
-                    )
         return True
 
     def sensitive_value(

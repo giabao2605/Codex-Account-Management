@@ -111,7 +111,7 @@ async function lifecycle(
   if (
     action === "unlink"
     && !window.confirm(
-      `Ngắt liên kết ${account.email}? Profile Codex local sẽ bị xóa vĩnh viễn.`,
+      `Ngắt liên kết Codex của ${account.email}? Tài khoản, OTP, lịch sử và cấu hình vẫn được giữ nguyên. Bạn có thể liên kết lại.`,
     )
   ) {
     return;
@@ -120,7 +120,7 @@ async function lifecycle(
     await accounts.lifecycle(account.id, action);
     const message = action === "login"
       ? "Đã mở quy trình đăng nhập."
-      : "Đã bỏ liên kết và xóa profile Codex local.";
+      : "Đã ngắt liên kết Codex. Tài khoản và lịch sử vẫn được giữ nguyên; bạn có thể liên kết lại.";
     feedback.success(message);
   } catch (error) {
     feedback.error(userFacingError(

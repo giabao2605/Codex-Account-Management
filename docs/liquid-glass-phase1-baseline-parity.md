@@ -74,7 +74,7 @@ Visual fixture xác nhận ba account states, nullable OTP, recommendation, toke
 | `/api/accounts/{account_id}/sensitive` | POST | CSRF-protected reveal password/secret theo field whitelist. | `test_invalid_sensitive_field_does_not_echo_input` |
 | `/api/codex/refresh` | POST | Refresh all hoặc một account; `force_token_usage` buộc làm mới token. | `test_manual_refresh_can_force_token_usage_refresh`, `test_account_refresh_can_force_token_usage_refresh` |
 | `/api/codex/{account_id}/login` | POST | Mở login local cho account. | `test_lifecycle_mutations_require_authentication_and_csrf` |
-| `/api/codex/{account_id}/unlink` | POST | Ngắt liên kết và xóa vĩnh viễn profile local sau path validation. | `test_unlink_permanently_deletes_profile_without_reading_auth` |
+| `/api/codex/{account_id}/unlink` | POST | Ngắt phiên đăng nhập sau path validation; chỉ gỡ `auth.json`, giữ tài khoản, OTP, lịch sử và cấu hình để liên kết lại. | `test_unlink_preserves_account_and_profile_without_reading_auth` |
 | `/api/application/shutdown` | POST | Shutdown callback at-most-once, retry được nếu callback fail. | `test_shutdown_callback_is_invoked_at_most_once`, `test_shutdown_can_retry_after_callback_failure` |
 
 ## Frontend parity matrix

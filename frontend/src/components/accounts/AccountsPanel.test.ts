@@ -139,6 +139,30 @@ describe("AccountsPanel", () => {
     expect(deleteAccount).not.toHaveBeenCalled();
   });
 
+  it("unlinks Codex while confirming account and history preservation", async () => {
+    const accounts = useAccountsStore();
+    const lifecycle = vi.spyOn(accounts, "lifecycle").mockResolvedValue();
+    const deleteAccount = vi.spyOn(accounts, "deleteAccount").mockResolvedValue();
+    const confirm = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirm);
+    const wrapper = mount(AccountsPanel);
+
+    await wrapper.findAll('[data-action="options"]')[0]!.trigger("click");
+    await vi.dynamicImportSettled();
+    await wrapper.get('[data-action="unlink"]').trigger("click");
+    await flushPromises();
+
+    expect(lifecycle).toHaveBeenCalledWith(applicationState().accounts[0]!.id, "unlink");
+    expect(deleteAccount).not.toHaveBeenCalled();
+    const confirmation = String(confirm.mock.calls[0]![0]);
+    expect(confirmation).toMatch(/giữ nguyên/i);
+    expect(confirmation).toMatch(/tài khoản/i);
+    expect(confirmation).toMatch(/lịch sử/i);
+    expect(confirmation).not.toContain("xóa vĩnh viễn");
+    expect(useFeedbackStore().message).toMatch(/giữ nguyên/i);
+    expect(useFeedbackStore().message).toMatch(/lịch sử/i);
+  });
+
   it("copies a sensitive value transiently without storing or rendering it", async () => {
     const accounts = useAccountsStore();
     vi.spyOn(accounts, "sensitiveValue").mockResolvedValue("transient-password");

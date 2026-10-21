@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import shutil
 import subprocess
 import threading
@@ -129,6 +130,8 @@ class Account:
     secret: str
     totp: pyotp.TOTP
     plus_expires_at: date | None = None
+    account_id: str = ""
+    profile_name: str = ""
 
 
 @dataclass
@@ -419,6 +422,59 @@ def profile_directory_for(email: str) -> Path:
     ).hexdigest()[:12]
 
     return CODEX_PROFILES_DIR / f"{safe_name[:24]}_{digest}"
+
+
+class AccountIdentityError(ValueError):
+    pass
+
+
+def account_identity(
+    email: str, stored_id: str | None = None, stored_profile: str | None = None,
+) -> tuple[str, str]:
+    """Freeze legacy identity in place; reject unsafe persisted metadata."""
+    if stored_id is None and stored_profile is None:
+        return (
+            hashlib.sha256(email.casefold().encode("utf-8")).hexdigest()[:16],
+            profile_directory_for(email).name,
+        )
+    if (
+        not isinstance(stored_id, str)
+        or re.fullmatch(r"[0-9a-f]{16}", stored_id) is None
+        or not isinstance(stored_profile, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", stored_profile) is None
+        or stored_profile.endswith((".", " "))
+        or Path(stored_profile).is_reserved()
+    ):
+        raise AccountIdentityError("Thông tin định danh profile không hợp lệ.")
+    return stored_id, stored_profile
+
+
+def load_account_identity(item: dict, email: str) -> tuple[str, str]:
+    try:
+        if ("account_id" in item or "profile_name" in item) and (
+            not isinstance(item.get("account_id"), str)
+            or not isinstance(item.get("profile_name"), str)
+        ):
+            raise AccountIdentityError("Thông tin định danh profile không đầy đủ.")
+        profile_name = decrypt_text(item["profile_name"]) if "profile_name" in item else None
+        return account_identity(email, item.get("account_id"), profile_name)
+    except Exception as error:
+        raise AccountIdentityError("Không thể đọc định danh profile đã lưu.") from error
+
+
+def new_account_identity() -> tuple[str, str]:
+    identifier = secrets.token_hex(8)
+    return identifier, f"profile_{identifier}"
+
+
+def validate_account_identities(accounts) -> None:
+    identities = [
+        account_identity(account.email, account.account_id or None, account.profile_name or None)
+        for account in accounts
+    ]
+    if (len({identifier for identifier, _ in identities}) != len(identities)
+            or len({name.casefold() for _, name in identities}) != len(identities)):
+        raise AccountIdentityError("Các tài khoản đang dùng chung định danh hoặc profile.")
 
 
 def ensure_codex_profile(profile_dir: Path) -> None:
@@ -1285,11 +1341,16 @@ class OTPManagerApp:
         )
 
     def save_accounts_to_disk(self) -> None:
+        validate_account_identities(self.accounts)
         encrypted_accounts = []
 
         for account in self.accounts:
             encrypted_accounts.append(
                 {
+                    "account_id": account.account_id or account_identity(account.email)[0],
+                    "profile_name": encrypt_text(
+                        account.profile_name or account_identity(account.email)[1]
+                    ),
                     "email": encrypt_text(
                         account.email
                     ),
@@ -1378,8 +1439,11 @@ class OTPManagerApp:
                         skipped_count += 1
                         continue
 
+                    identifier, profile_name = load_account_identity(item, email)
                     loaded_accounts.append(
                         Account(
+                            account_id=identifier,
+                            profile_name=profile_name,
                             email=email,
                             password=password,
                             secret=secret,
@@ -1391,9 +1455,12 @@ class OTPManagerApp:
                     seen_emails.add(email_key)
                     seen_secrets.add(secret)
 
+                except AccountIdentityError:
+                    raise
                 except Exception:
                     skipped_count += 1
 
+            validate_account_identities(loaded_accounts)
             self.accounts = loaded_accounts
             self.rebuild_table()
             self.sync_codex_rows()
@@ -1521,8 +1588,13 @@ class OTPManagerApp:
                     )
                     continue
 
+                identifier, profile_name = new_account_identity()
+                if (CODEX_PROFILES_DIR / profile_name).exists():
+                    raise AccountIdentityError("Thư mục profile mới đã tồn tại.")
                 self.accounts.append(
                     Account(
+                        account_id=identifier,
+                        profile_name=profile_name,
                         email=email,
                         password=password,
                         secret=secret,
@@ -2135,8 +2207,8 @@ class OTPManagerApp:
             )
             return
 
-        profile_dir = profile_directory_for(
-            account.email
+        profile_dir = CODEX_PROFILES_DIR / (
+            account.profile_name or profile_directory_for(account.email).name
         )
 
         environment = build_codex_environment(
@@ -2276,8 +2348,8 @@ class OTPManagerApp:
                     )
                     return "relogin"
 
-                profile_dir = profile_directory_for(
-                    account.email
+                profile_dir = CODEX_PROFILES_DIR / (
+                    account.profile_name or profile_directory_for(account.email).name
                 )
                 auth_file = profile_dir / "auth.json"
 

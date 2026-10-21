@@ -26,7 +26,7 @@ from .build_info import (
 )
 from .local_web_accounts import AccountConflictError
 from .local_web_profiles import UnsafeProfilePathError
-from .local_web_service import AccountNotFoundError, LocalWebService
+from .local_web_service import AccountEmailUpdateError, AccountNotFoundError, LocalWebService
 from .otp_codex_manager_with_account_status import (
     CODEX_PROFILES_DIR,
     DATA_FILE,
@@ -293,6 +293,16 @@ class SensitiveValueRequest(BaseModel):
 
 class SensitiveValueResponse(BaseModel):
     value: str
+
+
+class EmailUpdateRequest(BaseModel):
+    email: str
+
+
+class EmailUpdateResponse(BaseModel):
+    updated: bool
+    id: str
+    email: str
 
 
 class PasswordUpdateRequest(BaseModel):
@@ -710,6 +720,36 @@ def create_app(
             ) from error
 
         return SensitiveValueResponse(value=value)
+
+    @app.patch(
+        "/api/accounts/{account_id}/email",
+        response_model=EmailUpdateResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def update_email(
+        account_id: str,
+        request: EmailUpdateRequest,
+    ) -> EmailUpdateResponse:
+        try:
+            result = active_service.update_email(account_id, request.email)
+        except AccountNotFoundError as error:
+            raise HTTPException(
+                status_code=404, detail="Không tìm thấy tài khoản."
+            ) from error
+        except AccountConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (AccountEmailUpdateError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409, detail=str(error)
+            ) from error
+        except OSError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể ghi dữ liệu tài khoản.",
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return EmailUpdateResponse.model_validate(result)
 
     @app.patch(
         "/api/accounts/{account_id}/password",

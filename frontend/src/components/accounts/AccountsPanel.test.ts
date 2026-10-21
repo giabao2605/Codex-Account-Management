@@ -179,6 +179,27 @@ describe("AccountsPanel", () => {
     expect(useFeedbackStore().message).not.toContain("transient-password");
   });
 
+  it("edits the local email through the account menu", async () => {
+    const accounts = useAccountsStore();
+    const updateEmail = vi.spyOn(accounts, "updateEmail").mockResolvedValue();
+    const wrapper = mount(AccountsPanel, {
+      global: { stubs: { Teleport: true } },
+    });
+    await wrapper.findAll('[data-action="options"]')[0]!.trigger("click");
+    await vi.dynamicImportSettled();
+    await wrapper.get('[data-action="edit-email"]').trigger("click");
+    const input = wrapper.get<HTMLInputElement>('input[name="updated-email"]');
+    expect(input.element.value).toBe("alpha@example.test");
+    expect(wrapper.get('[role="dialog"]').text()).toContain("không đổi email đăng nhập OpenAI");
+    await input.setValue("not-an-email");
+    expect(wrapper.get('[data-action="save-email"]').attributes("disabled")).toBeDefined();
+    await input.setValue("edited@example.test");
+    await wrapper.get('[data-action="save-email"]').trigger("click");
+    await flushPromises();
+    expect(updateEmail).toHaveBeenCalledWith(applicationState().accounts[0]!.id, "edited@example.test");
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+  });
+
   it("updates only the locally stored password without prefilling it", async () => {
     const accounts = useAccountsStore();
     let finishUpdate!: () => void;

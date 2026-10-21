@@ -30,6 +30,7 @@ const emit = defineEmits<{
   refresh: [];
   login: [];
   unlink: [];
+  editEmail: [];
   editPassword: [];
   editPlusExpiration: [];
   delete: [];
@@ -129,6 +130,11 @@ function login(): void {
 function unlink(): void {
   closeOptions();
   emit("unlink");
+}
+
+function editEmail(): void {
+  closeOptions();
+  emit("editEmail");
 }
 
 function editPassword(): void {
@@ -359,6 +365,14 @@ function deleteAccount(): void {
             @click="unlink"
           >
             Ngắt liên kết
+          </SurfaceActionButton>
+          <SurfaceActionButton
+            role="menuitem"
+            data-action="edit-email"
+            :busy="isBusy('email')"
+            @click="editEmail"
+          >
+            Chỉnh sửa email
           </SurfaceActionButton>
           <SurfaceActionButton
             role="menuitem"

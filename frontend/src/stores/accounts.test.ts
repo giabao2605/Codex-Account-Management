@@ -138,6 +138,54 @@ describe("accounts store", () => {
     expect(store.filter).toBe("quota-available");
   });
 
+  it("keeps the edited account visible when plan and status filters no longer match", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const original = session.state.accounts[0]!;
+    const updateEmail = vi.fn().mockResolvedValue({ updated: true, id: original.id });
+    vi.spyOn(session, "getClient").mockReturnValue({ updateEmail } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockImplementation(async () => {
+      session.state = { ...applicationState(), accounts: [{ ...original,
+        email: "edited@example.test", plan_type: "—", quota_remaining: "—",
+        account_state: "Sai tài khoản Codex", sync_status: "Email Codex khác",
+      }] };
+    });
+    const store = useAccountsStore();
+    store.plan = "plus";
+    store.filter = "quota-available";
+    await store.updateEmail(original.id, "edited@example.test");
+    expect(store.filteredAccounts.map((account) => account.id)).toContain(original.id);
+    expect(store.plan).toBe("all");
+    expect(store.filter).toBe("all");
+  });
+
+  it("preserves filters and displayed data if email saving fails", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const updateEmail = vi.fn().mockRejectedValue(new Error("write denied"));
+    vi.spyOn(session, "getClient").mockReturnValue({ updateEmail } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+    const store = useAccountsStore();
+    store.plan = "plus";
+    store.filter = "quota-available";
+    await expect(store.updateEmail("1111111111111111", "edited@example.test")).rejects.toThrow("write denied");
+    expect(store.plan).toBe("plus");
+    expect(store.filter).toBe("quota-available");
+    expect(session.pollState).not.toHaveBeenCalled();
+  });
+
+  it("keeps account email edit busy state", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const updateEmail = vi.fn().mockResolvedValue({ updated: true });
+    vi.spyOn(session, "getClient").mockReturnValue({ updateEmail } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+    const store = useAccountsStore();
+    await store.updateEmail("1111111111111111", "edited@example.test");
+    expect(updateEmail).toHaveBeenCalledOnce();
+    expect(store.isBusy("1111111111111111", "email")).toBe(false);
+  });
+
   it("updates the Plus expiration through the typed client and refreshes state", async () => {
     const session = useSessionStore();
     session.state = applicationState();

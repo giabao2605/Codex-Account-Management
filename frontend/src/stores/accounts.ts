@@ -23,6 +23,7 @@ export type AccountAction =
   | "unlink"
   | "delete"
   | "plusExpiration"
+  | "email"
   | "password"
   | "secret";
 
@@ -118,6 +119,14 @@ export const useAccountsStore = defineStore("accounts", () => {
     });
   }
 
+  async function updateEmail(accountId: string, email: string): Promise<void> {
+    await withBusy(accountId, "email", async () => {
+      await session.getClient().updateEmail(accountId, email);
+      clearFilters();
+      await session.pollState(true);
+    });
+  }
+
   async function updatePassword(
     accountId: string,
     password: string,
@@ -178,6 +187,7 @@ export const useAccountsStore = defineStore("accounts", () => {
     refresh,
     sensitiveValue,
     updatePlusExpiration,
+    updateEmail,
     updatePassword,
     updateSecret,
   };

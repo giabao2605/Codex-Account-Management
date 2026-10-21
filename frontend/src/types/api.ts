@@ -234,6 +234,12 @@ export interface SensitiveValueResponse {
   value: string;
 }
 
+export interface EmailUpdateResponse {
+  updated: boolean;
+  id: string;
+  email: string;
+}
+
 export interface PasswordUpdateResponse {
   updated: boolean;
 }

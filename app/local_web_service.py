@@ -572,7 +572,7 @@ class LocalWebService:
         if (
             len(normalized_email) > 254
             or not re.fullmatch(
-                r"[^\\s@|]+@[^\\s@|]+\\.[^\\s@|]+",
+                r"[^\s@|]+@[^\s@|]+\.[^\s@|]+",
                 normalized_email,
             )
         ):

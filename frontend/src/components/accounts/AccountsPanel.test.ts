@@ -191,6 +191,8 @@ describe("AccountsPanel", () => {
     const input = wrapper.get<HTMLInputElement>('input[name="updated-email"]');
     expect(input.element.value).toBe("alpha@example.test");
     expect(wrapper.get('[role="dialog"]').text()).toContain("không đổi email đăng nhập OpenAI");
+    await input.setValue("not-an-email");
+    expect(wrapper.get('[data-action="save-email"]').attributes("disabled")).toBeDefined();
     await input.setValue("edited@example.test");
     await wrapper.get('[data-action="save-email"]').trigger("click");
     await flushPromises();

@@ -295,6 +295,16 @@ class SensitiveValueResponse(BaseModel):
     value: str
 
 
+class EmailUpdateRequest(BaseModel):
+    email: str
+
+
+class EmailUpdateResponse(BaseModel):
+    updated: bool
+    id: str
+    email: str
+
+
 class PasswordUpdateRequest(BaseModel):
     password: str
 
@@ -710,6 +720,32 @@ def create_app(
             ) from error
 
         return SensitiveValueResponse(value=value)
+
+    @app.patch(
+        "/api/accounts/{account_id}/email",
+        response_model=EmailUpdateResponse,
+        dependencies=[Depends(require_csrf)],
+    )
+    def update_email(
+        account_id: str,
+        request: EmailUpdateRequest,
+    ) -> EmailUpdateResponse:
+        try:
+            result = active_service.update_email(account_id, request.email)
+        except AccountNotFoundError as error:
+            raise HTTPException(
+                status_code=404, detail="Không tìm thấy tài khoản."
+            ) from error
+        except AccountConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except (OSError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể chuyển profile và cập nhật email an toàn.",
+            ) from error
+        return EmailUpdateResponse.model_validate(result)
 
     @app.patch(
         "/api/accounts/{account_id}/password",

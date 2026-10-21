@@ -26,7 +26,7 @@ from .build_info import (
 )
 from .local_web_accounts import AccountConflictError
 from .local_web_profiles import UnsafeProfilePathError
-from .local_web_service import AccountNotFoundError, LocalWebService
+from .local_web_service import AccountEmailUpdateError, AccountNotFoundError, LocalWebService
 from .otp_codex_manager_with_account_status import (
     CODEX_PROFILES_DIR,
     DATA_FILE,
@@ -738,10 +738,14 @@ def create_app(
             ) from error
         except AccountConflictError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        except (OSError, UnsafeProfilePathError) as error:
+        except (AccountEmailUpdateError, UnsafeProfilePathError) as error:
+            raise HTTPException(
+                status_code=409, detail=str(error)
+            ) from error
+        except OSError as error:
             raise HTTPException(
                 status_code=409,
-                detail="Không thể chuyển profile và cập nhật email an toàn.",
+                detail="Không thể ghi hoặc di chuyển dữ liệu tài khoản.",
             ) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

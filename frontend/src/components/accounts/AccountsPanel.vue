@@ -21,6 +21,9 @@ const accounts = useAccountsStore();
 const feedback = useFeedbackStore();
 const session = useSessionStore();
 const importOpen = ref(false);
+const emailAccount = ref<AccountState | null>(null);
+const updatedEmail = ref("");
+const emailSaving = ref(false);
 const passwordAccount = ref<AccountState | null>(null);
 const updatedPassword = ref("");
 const passwordSaving = ref(false);
@@ -37,6 +40,7 @@ const actionTypes: AccountAction[] = [
   "unlink",
   "delete",
   "plusExpiration",
+  "email",
   "password",
   "secret",
 ];
@@ -140,6 +144,42 @@ async function remove(account: AccountState): Promise<void> {
   } catch (error) {
     feedback.error(userFacingError(error, "Không thể xóa tài khoản."));
   }
+}
+
+function openEmailEditor(account: AccountState): void {
+  updatedEmail.value = account.email;
+  emailAccount.value = account;
+}
+
+function closeEmailEditor(): void {
+  if (emailSaving.value) return;
+  updatedEmail.value = "";
+  emailAccount.value = null;
+}
+
+async function saveEmail(): Promise<void> {
+  const account = emailAccount.value;
+  const email = updatedEmail.value.trim();
+  if (
+    emailSaving.value || !account || !email || email === account.email
+    || accounts.isBusy(account.id, "email")
+  ) return;
+
+  emailSaving.value = true;
+  try {
+    await accounts.updateEmail(account.id, email);
+    feedback.success("Đã cập nhật email đã lưu. Nếu email Codex khác, hãy liên kết lại đúng tài khoản.");
+    closeEmailEditorAfterSave();
+  } catch (error) {
+    feedback.error(userFacingError(error, "Không thể cập nhật email."));
+  } finally {
+    emailSaving.value = false;
+  }
+}
+
+function closeEmailEditorAfterSave(): void {
+  updatedEmail.value = "";
+  emailAccount.value = null;
 }
 
 function openPasswordEditor(account: AccountState): void {
@@ -333,11 +373,50 @@ async function savePlusExpiration(): Promise<void> {
         @refresh="refresh(account.id)"
         @login="lifecycle(account, 'login')"
         @unlink="lifecycle(account, 'unlink')"
+        @edit-email="openEmailEditor(account)"
         @edit-password="openPasswordEditor(account)"
         @edit-plus-expiration="openPlusExpirationEditor(account)"
         @delete="remove(account)"
       />
     </div>
+    <GlassDialog
+      v-if="emailAccount !== null"
+      :open="true"
+      title="Chỉnh sửa email"
+      @close="closeEmailEditor"
+    >
+      <label for="updated-email">Email mới thay cho {{ emailAccount?.email }}</label>
+      <input
+        id="updated-email"
+        v-model="updatedEmail"
+        name="updated-email"
+        type="email"
+        class="standard-control"
+        data-material="standard-control"
+        autocomplete="email"
+        maxlength="254"
+        spellcheck="false"
+        aria-describedby="email-update-note"
+        @keydown.enter="saveEmail"
+      >
+      <p id="email-update-note">
+        Chỉ đổi email đã lưu trong ứng dụng, không đổi email đăng nhập OpenAI.
+        Profile Codex sẽ được chuyển theo; nếu email đăng nhập Codex khác, cần liên kết lại.
+      </p>
+      <template #actions>
+        <SurfaceActionButton :disabled="emailSaving" @click="closeEmailEditor">
+          Hủy
+        </SurfaceActionButton>
+        <SurfaceActionButton
+          data-action="save-email"
+          :busy="emailSaving"
+          :disabled="!updatedEmail.trim() || updatedEmail.trim() === emailAccount.email"
+          @click="saveEmail"
+        >
+          Lưu
+        </SurfaceActionButton>
+      </template>
+    </GlassDialog>
     <GlassDialog
       v-if="passwordAccount !== null"
       :open="true"

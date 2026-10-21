@@ -1744,6 +1744,38 @@ class LocalWebApiTests(unittest.TestCase):
         self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
         self.assertEqual(self.client.get("/api/state").json()["accounts"][0]["email"], "old@example.com")
 
+    def test_update_email_reports_windows_profile_lock(self) -> None:
+        self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
+        profile = self.service.profile_directory("old@example.com")
+        profile.mkdir()
+        with patch(
+            "app.local_web_service.os.replace",
+            side_effect=PermissionError("simulated sharing violation"),
+        ), patch("app.local_web_service.time.sleep") as wait:
+            response = self.client.patch(
+                f"/api/accounts/{self.service.account_id('old@example.com')}/email",
+                headers=self.headers,
+                json={"email": "new@example.com"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Windows đang khóa", response.json()["detail"])
+        self.assertEqual(wait.call_count, 3)
+        self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
+        self.assertTrue(profile.exists())
+
+    def test_update_email_reports_unrelated_existing_profile_directory(self) -> None:
+        self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
+        destination = self.service.profile_directory("unused@example.com")
+        destination.mkdir()
+        response = self.client.patch(
+            f"/api/accounts/{self.service.account_id('old@example.com')}/email",
+            headers=self.headers,
+            json={"email": "unused@example.com"},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("đã tồn tại", response.json()["detail"])
+        self.assertEqual(self.service._load_accounts()[0].email, "old@example.com")
+
     def test_update_email_does_not_overwrite_existing_profile(self) -> None:
         self.add_account("old@example.com|password|JBSWY3DPEHPK3PXP")
         old_profile = self.service.profile_directory("old@example.com")

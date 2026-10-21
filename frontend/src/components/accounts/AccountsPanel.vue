@@ -28,7 +28,7 @@ const emailValid = computed(() => {
   const email = updatedEmail.value.trim();
   return (
     email.length <= 254
-    && /^[^\\s@|]+@[^\\s@|]+\\.[^\\s@|]+$/.test(email)
+    && /^[^\s@|]+@[^\s@|]+\.[^\s@|]+$/.test(email)
     && email !== emailAccount.value?.email
   );
 });

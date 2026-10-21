@@ -738,13 +738,13 @@ def create_app(
             ) from error
         except AccountConflictError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
         except (OSError, UnsafeProfilePathError) as error:
             raise HTTPException(
                 status_code=409,
                 detail="Không thể chuyển profile và cập nhật email an toàn.",
             ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         return EmailUpdateResponse.model_validate(result)
 
     @app.patch(

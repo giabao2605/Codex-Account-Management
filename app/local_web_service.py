@@ -71,6 +71,10 @@ class AccountNotFoundError(LookupError):
     pass
 
 
+class AccountEmailUpdateError(OSError):
+    """A safe, actionable email/profile migration error for the local UI."""
+
+
 _ATTENTION_TERMS = (
     "lỗi",
     "khóa",
@@ -567,6 +571,31 @@ class LocalWebService:
 
         raise ValueError("Trường dữ liệu không hợp lệ.")
 
+    @staticmethod
+    def _move_email_profile(source: Path, destination: Path) -> None:
+        """Retry transient Windows sharing violations without overwriting profiles."""
+        for attempt in range(4):
+            if destination.exists():
+                raise UnsafeProfilePathError(
+                    "Thư mục profile đích đã tồn tại. Không thể tự động ghi đè."
+                )
+            try:
+                os.replace(source, destination)
+                return
+            except PermissionError as error:
+                if attempt == 3:
+                    raise AccountEmailUpdateError(
+                        "Windows đang khóa thư mục profile Codex. "
+                        "Hãy đóng các cửa sổ Codex CLI đang sử dụng tài khoản "
+                        "và thử lại."
+                    ) from error
+                time.sleep(0.2 * (attempt + 1))
+            except OSError as error:
+                raise AccountEmailUpdateError(
+                    "Không thể di chuyển thư mục profile Codex. "
+                    "Hãy kiểm tra quyền truy cập thư mục."
+                ) from error
+
     def update_email(self, account_id: str, email: str) -> dict[str, object]:
         normalized_email = email.strip()
         if (
@@ -604,19 +633,34 @@ class LocalWebService:
                         "Thư mục profile của email mới đã tồn tại."
                     )
                 if not self._stop_login_process(old_key):
-                    raise OSError("Không thể dừng đăng nhập Codex.")
+                    raise AccountEmailUpdateError(
+                        "Không thể dừng tiến trình đăng nhập Codex đang chạy."
+                    )
                 if not self._close_session(old_key):
-                    raise OSError("Không thể dừng Codex App Server.")
+                    raise AccountEmailUpdateError(
+                        "Không thể dừng Codex App Server đang sử dụng profile."
+                    )
 
                 moved = False
                 if old_profile != new_profile and old_profile.exists():
-                    os.replace(old_profile, new_profile)
+                    self._move_email_profile(old_profile, new_profile)
                     moved = True
                 try:
                     self._save_accounts(new_accounts)
-                except Exception:
+                except Exception as error:
                     if moved:
-                        os.replace(new_profile, old_profile)
+                        try:
+                            self._move_email_profile(new_profile, old_profile)
+                        except (OSError, UnsafeProfilePathError) as rollback_error:
+                            raise AccountEmailUpdateError(
+                                "Không thể lưu email và khôi phục profile. "
+                                "Hãy dừng ứng dụng và kiểm tra dữ liệu trước khi thử lại."
+                            ) from rollback_error
+                    if isinstance(error, OSError):
+                        raise AccountEmailUpdateError(
+                            "Không thể ghi dữ liệu tài khoản. "
+                            "Hãy kiểm tra quyền ghi file accounts.json."
+                        ) from error
                     raise
 
                 with self._lock:

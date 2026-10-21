@@ -138,6 +138,18 @@ describe("accounts store", () => {
     expect(store.filter).toBe("quota-available");
   });
 
+  it("keeps account email edit busy state", async () => {
+    const session = useSessionStore();
+    session.state = applicationState();
+    const updateEmail = vi.fn().mockResolvedValue({ updated: true });
+    vi.spyOn(session, "getClient").mockReturnValue({ updateEmail } as unknown as LocalApiClient);
+    vi.spyOn(session, "pollState").mockResolvedValue();
+    const store = useAccountsStore();
+    await store.updateEmail("1111111111111111", "edited@example.test");
+    expect(updateEmail).toHaveBeenCalledOnce();
+    expect(store.isBusy("1111111111111111", "email")).toBe(false);
+  });
+
   it("updates the Plus expiration through the typed client and refreshes state", async () => {
     const session = useSessionStore();
     session.state = applicationState();

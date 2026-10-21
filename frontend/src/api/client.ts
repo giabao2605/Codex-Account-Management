@@ -6,6 +6,7 @@ import type {
   BootstrapResponse,
   DeleteResponse,
   FailoverStatusResponse,
+  EmailUpdateResponse,
   PasswordUpdateResponse,
   SecretUpdateResponse,
   PlusExpirationUpdateResponse,
@@ -79,6 +80,19 @@ export class LocalApiClient {
       {
         method: "POST",
         body: JSON.stringify({ field }),
+      },
+    );
+  }
+
+  async updateEmail(
+    accountId: string,
+    email: string,
+  ): Promise<EmailUpdateResponse> {
+    return this.request<EmailUpdateResponse>(
+      `/api/accounts/${encodeURIComponent(accountId)}/email`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ email }),
       },
     );
   }
